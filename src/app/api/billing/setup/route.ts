@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
 import { auditLogs, billingCustomers } from "@/db/schema";
-import { getAuth } from "@/lib/auth";
+import { getPrincipal } from "@/lib/authorization";
 import { getServerEnv } from "@/lib/env";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
 import { getStripe } from "@/lib/stripe";
@@ -14,9 +14,9 @@ export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
     return Response.json({ error: "Request origin could not be verified." }, { status: 403 });
   }
-  const session = await getAuth().api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "Sign in before adding a payment card." }, { status: 401 });
-  if (!(await enforceRateLimit(request, `billing-setup:${session.user.id}`, 5, 900))) {
+  const principal = await getPrincipal(request.headers);
+  if (!principal) return Response.json({ error: "Sign in before adding a payment card." }, { status: 401 });
+  if (!(await enforceRateLimit(request, `billing-setup:${principal.actor.id}`, 5, 900))) {
     return Response.json({ error: "Too many card setup attempts. Try again later." }, { status: 429 });
   }
 
@@ -34,16 +34,16 @@ export async function POST(request: Request) {
 
   const db = getDb();
   const existing = await db.query.billingCustomers.findFirst({
-    where: eq(billingCustomers.userId, session.user.id),
+    where: eq(billingCustomers.userId, principal.actor.id),
   });
   let stripeCustomerId = existing?.stripeCustomerId;
   if (!stripeCustomerId) {
     let customerId: string;
     try {
       const customer = await getStripe().customers.create({
-        email: session.user.email,
-        name: session.user.name,
-        metadata: { userId: session.user.id },
+        email: principal.actor.email,
+        name: principal.actor.name,
+        metadata: { userId: principal.actor.id },
       });
       customerId = customer.id;
     } catch {
@@ -53,11 +53,11 @@ export async function POST(request: Request) {
     try {
       await db.insert(billingCustomers).values({
         id: randomUUID(),
-        userId: session.user.id,
+        userId: principal.actor.id,
         stripeCustomerId: customerId,
       }).onConflictDoNothing({ target: billingCustomers.userId });
       const persisted = await db.query.billingCustomers.findFirst({
-        where: eq(billingCustomers.userId, session.user.id),
+        where: eq(billingCustomers.userId, principal.actor.id),
       });
       if (!persisted) {
         return Response.json({ error: "A billing profile could not be created. Please try again." }, { status: 503 });
@@ -74,9 +74,9 @@ export async function POST(request: Request) {
       mode: "setup",
       customer: stripeCustomerId,
       allowed_payment_method_types: ["card"],
-      client_reference_id: session.user.id,
-      metadata: { userId: session.user.id },
-      setup_intent_data: { metadata: { userId: session.user.id } },
+      client_reference_id: principal.actor.id,
+      metadata: { userId: principal.actor.id },
+      setup_intent_data: { metadata: { userId: principal.actor.id } },
       success_url: new URL("/account?payment=success&session_id={CHECKOUT_SESSION_ID}", returnUrl).toString(),
       cancel_url: new URL("/account?payment=cancelled", returnUrl).toString(),
     });
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
   try {
     await db.insert(auditLogs).values({
       id: randomUUID(),
-      userId: session.user.id,
+      userId: principal.actor.id,
       action: "billing.card_setup.started",
       resource: "billing",
     });

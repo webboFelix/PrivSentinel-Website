@@ -13,8 +13,8 @@ const demoVideoOrigin = (() => {
 })();
 
 const nextConfig: NextConfig = {
-  cacheComponents: true,
-  partialPrefetching: true,
+  cacheComponents: false,
+  partialPrefetching: false,
   poweredByHeader: false,
   async headers() {
     return [{

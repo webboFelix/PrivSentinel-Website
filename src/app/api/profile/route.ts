@@ -3,22 +3,22 @@ import { eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
 import { auditLogs, profileDetails, profiles, user } from "@/db/schema";
-import { getAuth } from "@/lib/auth";
+import { getPrincipal } from "@/lib/authorization";
 import { profileSchema } from "@/lib/validation";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
 
 export async function GET(request: Request) {
   await connection();
   await ensureDatabaseSchema();
-  const session = await getAuth().api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "Sign in to view your account." }, { status: 401 });
+  const principal = await getPrincipal(request.headers);
+  if (!principal) return Response.json({ error: "Sign in to view your account." }, { status: 401 });
 
   const [profile, details] = await Promise.all([
     getDb().query.profiles.findFirst({
-    where: eq(profiles.userId, session.user.id),
+    where: eq(profiles.userId, principal.actor.id),
     }),
     getDb().query.profileDetails.findFirst({
-      where: eq(profileDetails.userId, session.user.id),
+      where: eq(profileDetails.userId, principal.actor.id),
     }),
   ]);
   return Response.json({
@@ -29,6 +29,8 @@ export async function GET(request: Request) {
       currentPosition: details?.currentPosition ?? null,
     } : null,
     avatar: details?.avatar ?? null,
+    role: principal.actor.role,
+    status: "active",
   });
 }
 
@@ -38,8 +40,8 @@ export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
     return Response.json({ error: "Request origin could not be verified." }, { status: 403 });
   }
-  const session = await getAuth().api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "Sign in to complete your profile." }, { status: 401 });
+  const principal = await getPrincipal(request.headers);
+  if (!principal) return Response.json({ error: "Sign in to complete your profile." }, { status: 401 });
 
   if (!(await enforceRateLimit(request, "profile", 8, 900))) {
     return Response.json({ error: "Too many profile updates. Try again later." }, { status: 429 });
@@ -61,7 +63,7 @@ export async function POST(request: Request) {
 
   const db = getDb();
   const existingDetails = await db.query.profileDetails.findFirst({
-    where: eq(profileDetails.userId, session.user.id),
+    where: eq(profileDetails.userId, principal.actor.id),
   });
   if (existingDetails?.gender && existingDetails.gender !== parsed.data.gender) {
     return Response.json({
@@ -72,7 +74,7 @@ export async function POST(request: Request) {
 
   await db.insert(profiles).values({
     id: randomUUID(),
-    userId: session.user.id,
+    userId: principal.actor.id,
     fullName: parsed.data.fullName,
     phoneNumber: parsed.data.phoneNumber,
   }).onConflictDoUpdate({
@@ -84,7 +86,7 @@ export async function POST(request: Request) {
     },
   });
   await db.insert(profileDetails).values({
-    userId: session.user.id,
+    userId: principal.actor.id,
     gender: parsed.data.gender,
     organization: parsed.data.organization,
     currentPosition: parsed.data.currentPosition,
@@ -97,10 +99,10 @@ export async function POST(request: Request) {
       updatedAt: new Date(),
     },
   });
-  await db.update(user).set({ name: parsed.data.fullName, updatedAt: new Date() }).where(eq(user.id, session.user.id));
+  await db.update(user).set({ name: parsed.data.fullName, updatedAt: new Date() }).where(eq(user.id, principal.actor.id));
   await db.insert(auditLogs).values({
     id: randomUUID(),
-    userId: session.user.id,
+    userId: principal.actor.id,
     action: "profile.updated",
     resource: "profile",
   });

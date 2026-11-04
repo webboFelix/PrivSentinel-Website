@@ -1,10 +1,29 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin, createAccessControl } from "better-auth/plugins";
 import { getDb } from "@/db";
-import * as schema from "@/db/schema";
-import { getServerEnv } from "@/lib/env";
+import { auditLogs, schema } from "@/db/schema";
+import { getAuthConfigurationStatus, getServerEnv } from "@/lib/env";
+
+const statements = {
+  user: ["create", "list", "set-role", "ban", "impersonate", "impersonate-admins", "delete", "set-password", "set-email", "get", "update"],
+  session: ["list", "revoke", "delete"],
+} as const;
+const accessControl = createAccessControl(statements);
+const userRole = accessControl.newRole({ user: [], session: [] });
+const administratorRole = accessControl.newRole({
+  user: ["list", "get"],
+  session: [],
+});
+const superAdministratorRole = accessControl.newRole({
+  user: ["list", "get"],
+  session: [],
+});
 
 function createAuth() {
+  if (!getAuthConfigurationStatus().available) {
+    throw new Error("Authentication server configuration is incomplete.");
+  }
   const env = getServerEnv();
   const googleConfigured = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
   const appUrl = env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL;
@@ -63,20 +82,58 @@ function createAuth() {
           },
         }
       : {},
-    user: {
-      additionalFields: {
-        role: {
-          type: "string",
-          required: false,
-          input: false,
-          defaultValue: "user",
-        },
-      },
-    },
     rateLimit: {
       enabled: true,
       window: 60,
       max: 30,
+    },
+    plugins: [
+      admin({
+        defaultRole: "user",
+        adminRoles: ["admin", "super_admin"],
+        ac: accessControl,
+        roles: {
+          user: userRole,
+          admin: administratorRole,
+          super_admin: superAdministratorRole,
+        },
+      }),
+    ],
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (createdUser) => {
+            await getDb().insert(auditLogs).values({
+              id: crypto.randomUUID(),
+              userId: createdUser.id,
+              action: "user.registered",
+              resource: "user",
+              targetType: "user",
+              targetId: createdUser.id,
+            });
+          },
+        },
+      },
+      session: {
+        create: {
+          after: async (createdSession) => {
+            const account = await getDb().query.user.findFirst({
+              columns: { role: true },
+              where: (user, { eq }) => eq(user.id, createdSession.userId),
+            });
+            await getDb().insert(auditLogs).values({
+              id: crypto.randomUUID(),
+              userId: createdSession.userId,
+              action: account?.role === "admin" || account?.role === "super_admin"
+                ? "auth.admin_login.succeeded"
+                : "auth.login.succeeded",
+              resource: "auth",
+              targetType: "user",
+              targetId: createdSession.userId,
+            });
+          },
+        },
+      },
     },
   });
 }

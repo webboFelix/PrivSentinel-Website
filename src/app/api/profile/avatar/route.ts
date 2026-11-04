@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
 import { auditLogs, profileDetails } from "@/db/schema";
-import { getAuth } from "@/lib/auth";
+import { getPrincipal } from "@/lib/authorization";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
 
 
@@ -25,9 +25,9 @@ export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
     return Response.json({ error: "Request origin could not be verified." }, { status: 403 });
   }
-  const session = await getAuth().api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "Sign in to update your avatar." }, { status: 401 });
-  if (!(await enforceRateLimit(request, `avatar:${session.user.id}`, 8, 900))) {
+  const principal = await getPrincipal(request.headers);
+  if (!principal) return Response.json({ error: "Sign in to update your avatar." }, { status: 401 });
+  if (!(await enforceRateLimit(request, `avatar:${principal.actor.id}`, 8, 900))) {
     return Response.json({ error: "Too many avatar updates. Try again later." }, { status: 429 });
   }
 
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
   if (image === null) {
     const db = getDb();
     await db.insert(profileDetails).values({
-      userId: session.user.id,
+      userId: principal.actor.id,
       avatar: null,
     }).onConflictDoUpdate({
       target: profileDetails.userId,
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     });
     await db.insert(auditLogs).values({
       id: randomUUID(),
-      userId: session.user.id,
+      userId: principal.actor.id,
       action: "profile.avatar.removed",
       resource: "profile.avatar",
     });
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
 
   const db = getDb();
   await db.insert(profileDetails).values({
-    userId: session.user.id,
+    userId: principal.actor.id,
     avatar: image,
   }).onConflictDoUpdate({
     target: profileDetails.userId,
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
   });
   await db.insert(auditLogs).values({
     id: randomUUID(),
-    userId: session.user.id,
+    userId: principal.actor.id,
     action: "profile.avatar.updated",
     resource: "profile.avatar",
   });

@@ -17,6 +17,14 @@ const serverEnvSchema = z.object({
     z.string().min(32).optional(),
   ),
   BETTER_AUTH_URL: optionalUrl,
+  INITIAL_SUPER_ADMIN_EMAIL: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().email().transform((value) => value.toLowerCase()).optional(),
+  ),
+  SUPER_ADMIN_BOOTSTRAP_SECRET: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().min(32).optional(),
+  ),
   GOOGLE_CLIENT_ID: optionalNonEmpty,
   GOOGLE_CLIENT_SECRET: optionalNonEmpty,
   GITHUB_TOKEN: optionalNonEmpty,
@@ -40,6 +48,9 @@ const serverEnvSchema = z.object({
   if (Boolean(env.RESEND_API_KEY) !== Boolean(env.RESEND_FROM_EMAIL)) {
     context.addIssue({ code: "custom", message: "Configure both password reset email settings." });
   }
+  if (Boolean(env.INITIAL_SUPER_ADMIN_EMAIL) !== Boolean(env.SUPER_ADMIN_BOOTSTRAP_SECRET)) {
+    context.addIssue({ code: "custom", message: "Configure both initial super-admin bootstrap settings or neither." });
+  }
 });
 
 export function getServerEnv() {
@@ -48,6 +59,19 @@ export function getServerEnv() {
     throw new Error("Server environment configuration is invalid.");
   }
   return parsed.data;
+}
+
+export function getAuthConfigurationStatus() {
+  const parsed = serverEnvSchema.safeParse(process.env);
+  if (!parsed.success) {
+    return { available: false, missing: ["server configuration"] };
+  }
+
+  const missing = [];
+  if (!parsed.data.TURSO_DATABASE_URL) missing.push("TURSO_DATABASE_URL");
+  if (!parsed.data.TURSO_AUTH_TOKEN) missing.push("TURSO_AUTH_TOKEN");
+  if (!parsed.data.BETTER_AUTH_SECRET) missing.push("BETTER_AUTH_SECRET");
+  return { available: missing.length === 0, missing };
 }
 
 export function getDatabaseConfig() {

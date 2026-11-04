@@ -16,6 +16,9 @@ export const user = sqliteTable("user", {
   emailVerified: integer("emailVerified", { mode: "boolean" }).notNull().default(false),
   image: text("image"),
   role: text("role").notNull().default("user"),
+  banned: integer("banned", { mode: "boolean" }).notNull().default(false),
+  banReason: text("banReason"),
+  banExpires: integer("banExpires", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -28,6 +31,7 @@ export const session = sqliteTable("session", {
   updatedAt: updatedAt(),
   ipAddress: text("ipAddress"),
   userAgent: text("userAgent"),
+  impersonatedBy: text("impersonatedBy"),
   userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
 }, (table) => [index("session_userId_idx").on(table.userId)]);
 
@@ -128,6 +132,8 @@ export const auditLogs = sqliteTable("audit_logs", {
   action: text("action").notNull(),
   resource: text("resource").notNull(),
   timestamp: integer("timestamp", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+  targetType: text("targetType"),
+  targetId: text("targetId"),
   metadata: text("metadata"),
 }, (table) => [index("audit_logs_timestamp_idx").on(table.timestamp)]);
 
@@ -142,9 +148,53 @@ export const testimonials = sqliteTable("testimonials", {
   name: text("name").notNull(),
   location: text("location"),
   quote: text("quote").notNull(),
+  title: text("title").notNull().default(""),
+  userId: text("userId").references(() => user.id, { onDelete: "set null" }),
+  designation: text("designation"),
+  publicConsent: integer("publicConsent", { mode: "boolean" }).notNull().default(false),
+  displayNameConsent: integer("displayNameConsent", { mode: "boolean" }).notNull().default(false),
+  status: text("status").notNull().default("pending"),
   rating: integer("rating").notNull(),
   approvedAt: integer("approvedAt", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
-}, (table) => [index("testimonials_approvedAt_idx").on(table.approvedAt)]);
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).$defaultFn(() => new Date()),
+  reviewedBy: text("reviewedBy").references(() => user.id, { onDelete: "set null" }),
+  reviewedAt: integer("reviewedAt", { mode: "timestamp_ms" }),
+}, (table) => [
+  index("testimonials_approvedAt_idx").on(table.approvedAt),
+  uniqueIndex("testimonials_userId_unique").on(table.userId),
+  index("testimonials_status_idx").on(table.status),
+]);
 
-export const schema = { user, session, account, verification, profiles, profileDetails, billingCustomers, paymentMethods, releases, downloads, auditLogs, rateLimits, testimonials };
+export const releaseOverrides = sqliteTable("release_overrides", {
+  tagName: text("tagName").primaryKey(),
+  releaseName: text("releaseName"),
+  releaseNotes: text("releaseNotes"),
+  isPublished: integer("isPublished", { mode: "boolean" }).notNull().default(true),
+  updatedBy: text("updatedBy").references(() => user.id, { onDelete: "set null" }),
+  updatedAt: updatedAt(),
+});
+
+export const adminBootstrap = sqliteTable("admin_bootstrap", {
+  id: text("id").primaryKey(),
+  completedAt: integer("completedAt", { mode: "timestamp_ms" }),
+  completedBy: text("completedBy").references(() => user.id, { onDelete: "set null" }),
+});
+
+export const schema = {
+  user,
+  session,
+  account,
+  verification,
+  profiles,
+  profileDetails,
+  billingCustomers,
+  paymentMethods,
+  releases,
+  releaseOverrides,
+  downloads,
+  auditLogs,
+  rateLimits,
+  testimonials,
+  adminBootstrap,
+};

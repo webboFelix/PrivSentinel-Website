@@ -1,8 +1,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
-import { getAuth } from "@/lib/auth";
 import { getServerEnv } from "@/lib/env";
+import { getPrincipal } from "@/lib/authorization";
 
 export async function requireUser(nextPath: string) {
   await connection();
@@ -11,7 +11,7 @@ export async function requireUser(nextPath: string) {
     redirect(`/login?next=${encodeURIComponent(nextPath)}`);
   }
 
-  const session = await getAuth().api.getSession({ headers: await headers() });
-  if (!session) redirect(`/login?next=${encodeURIComponent(nextPath)}`);
-  return session;
+  const principal = await getPrincipal(await headers());
+  if (!principal) redirect(`/login?next=${encodeURIComponent(nextPath)}`);
+  return principal.session;
 }

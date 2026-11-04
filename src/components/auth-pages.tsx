@@ -30,17 +30,21 @@ function googleSignInError(error: unknown) {
 }
 
 function registrationError(error: { status?: number; message?: string }) {
+  if (error.status === 503) {
+    return "Registration is temporarily unavailable. Please contact the site administrator.";
+  }
   if (error.status === 403) {
     return "Sign-up was blocked because this site URL is not trusted. Use the configured app URL or update BETTER_AUTH_URL to match it.";
   }
   return error.message || "Account creation failed. Check your details and try again.";
 }
 
-function AuthShell({ children, eyebrow, title, description }: {
+function AuthShell({ children, eyebrow, title, description, authAvailable = true }: {
   children: React.ReactNode;
   eyebrow: string;
   title: string;
   description: string;
+  authAvailable?: boolean;
 }) {
   return (
     <main className="auth-page">
@@ -52,6 +56,7 @@ function AuthShell({ children, eyebrow, title, description }: {
           <span className="auth-eyebrow">{eyebrow}</span>
           <h1>{title}</h1>
           <p className="auth-description">{description}</p>
+          {!authAvailable && <p className="auth-message error" role="status">Sign-in and registration are temporarily unavailable. Please contact the site administrator.</p>}
           {children}
           <div className="auth-trust"><ShieldCheck size={14} /> Your account information is protected</div>
         </section>
@@ -61,7 +66,7 @@ function AuthShell({ children, eyebrow, title, description }: {
   );
 }
 
-export function RegisterPage({ googleConfigured }: { googleConfigured: boolean }) {
+export function RegisterPage({ authAvailable, googleConfigured }: { authAvailable: boolean; googleConfigured: boolean }) {
   const router = useRouter();
   const [values, setValues] = useState({ fullName: "", email: "", phoneNumber: "", gender: "", password: "", confirmPassword: "" });
   const [error, setError] = useState("");
@@ -71,7 +76,7 @@ export function RegisterPage({ googleConfigured }: { googleConfigured: boolean }
   const [googleError, setGoogleError] = useState("");
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("provider") !== "google") return;
+    if (!authAvailable || new URLSearchParams(window.location.search).get("provider") !== "google") return;
     if (!googleConfigured) return;
     const next = new URLSearchParams(window.location.search).get("next");
     const destination = `/account?completeProfile=1${next ? `&next=${encodeURIComponent(safeNextPath())}` : ""}`;
@@ -80,9 +85,10 @@ export function RegisterPage({ googleConfigured }: { googleConfigured: boolean }
         if (result.error) setGoogleError(googleSignInError(result.error));
       })
       .catch((error: unknown) => setGoogleError(googleSignInError(error)));
-  }, [googleConfigured]);
+  }, [authAvailable, googleConfigured]);
 
   async function continueWithGoogle() {
+    if (!authAvailable) return;
     if (!googleConfigured) {
       setGoogleError("Google sign-in is not available at the moment. Create your account with email and password instead.");
       return;
@@ -106,6 +112,7 @@ export function RegisterPage({ googleConfigured }: { googleConfigured: boolean }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!authAvailable) return;
     setError("");
     setFieldErrors({});
     if (values.password !== values.confirmPassword) {
@@ -172,7 +179,7 @@ export function RegisterPage({ googleConfigured }: { googleConfigured: boolean }
   };
 
   return (
-    <AuthShell eyebrow="CREATE YOUR ACCOUNT" title="Start with a safer view." description="Create an account to access published Windows releases and security updates.">
+    <AuthShell authAvailable={authAvailable} eyebrow="CREATE YOUR ACCOUNT" title="Start with a safer view." description="Create an account to access published Windows releases and security updates.">
       <form className="auth-form" onSubmit={submit} noValidate>
         <label>Full name<input autoComplete="name" value={values.fullName} onChange={update("fullName")} placeholder="Your full name" aria-invalid={Boolean(fieldErrors.fullName)} />{fieldErrors.fullName && <small>{fieldErrors.fullName}</small>}</label>
         <label>Email address<input type="email" autoComplete="email" value={values.email} onChange={update("email")} placeholder="you@example.com" aria-invalid={Boolean(fieldErrors.email)} />{fieldErrors.email && <small>{fieldErrors.email}</small>}</label>
@@ -181,10 +188,10 @@ export function RegisterPage({ googleConfigured }: { googleConfigured: boolean }
         <label>Password<span className="password-input"><input type={showPassword ? "text" : "password"} autoComplete="new-password" minLength={12} maxLength={128} value={values.password} onChange={update("password")} placeholder="At least 12 characters" aria-invalid={Boolean(fieldErrors.password)} aria-describedby="password-requirements" /><button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((show) => !show)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span><small id="password-requirements">Use 12–128 characters with uppercase and lowercase letters, a number, and a symbol.</small>{fieldErrors.password && <small>{fieldErrors.password}</small>}</label>
         <label>Confirm password<input type="password" autoComplete="new-password" value={values.confirmPassword} onChange={update("confirmPassword")} placeholder="Enter your password again" aria-invalid={Boolean(fieldErrors.confirmPassword)} />{fieldErrors.confirmPassword && <small>{fieldErrors.confirmPassword}</small>}</label>
         {error && <p className="auth-message error" role="alert">{error}</p>}
-        <button className="auth-submit" type="submit" disabled={busy}>{busy ? "Creating account…" : "Create account"} <ArrowRight size={16} /></button>
+        <button className="auth-submit" type="submit" disabled={!authAvailable || busy}>{busy ? "Creating account…" : "Create account"} <ArrowRight size={16} /></button>
       </form>
       <div className="auth-or"><span />OR<span /></div>
-      <button className="auth-google" type="button" disabled={busy} onClick={() => void continueWithGoogle()}><b>G</b> {busy ? "Connecting to Google…" : "Continue with Google"}</button>
+      <button className="auth-google" type="button" disabled={!authAvailable || busy} onClick={() => void continueWithGoogle()}><b>G</b> {busy ? "Connecting to Google…" : "Continue with Google"}</button>
       {googleError && <p className="auth-message error" role="alert">{googleError}</p>}
       <p className="auth-switch">Already have an account? <Link href="/login">Sign in</Link></p>
       <p className="auth-privacy">Your gender selection is required to complete your account profile and is not shown publicly.</p>
@@ -192,7 +199,7 @@ export function RegisterPage({ googleConfigured }: { googleConfigured: boolean }
   );
 }
 
-export function LoginPage({ googleConfigured }: { googleConfigured: boolean }) {
+export function LoginPage({ authAvailable, googleConfigured }: { authAvailable: boolean; googleConfigured: boolean }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -202,11 +209,20 @@ export function LoginPage({ googleConfigured }: { googleConfigured: boolean }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!authAvailable) return;
     setBusy(true);
     setError("");
-    const result = await authClient.signIn.email({ email: email.trim(), password });
-    if (result.error) {
-      setError("Email or password is incorrect. Try again or reset your password.");
+    try {
+      const result = await authClient.signIn.email({ email: email.trim(), password });
+      if (result.error) {
+        setError(result.error.status === 503
+          ? "Sign-in is temporarily unavailable. Please contact the site administrator."
+          : "Email or password is incorrect. Try again or reset your password.");
+        setBusy(false);
+        return;
+      }
+    } catch {
+      setError("Sign-in is temporarily unavailable. Check your connection and try again.");
       setBusy(false);
       return;
     }
@@ -222,6 +238,7 @@ export function LoginPage({ googleConfigured }: { googleConfigured: boolean }) {
   }
 
   async function continueWithGoogle() {
+    if (!authAvailable) return;
     if (!googleConfigured) {
       setGoogleError("Google sign-in is not available at the moment. Sign in with email and password instead.");
       return;
@@ -243,15 +260,15 @@ export function LoginPage({ googleConfigured }: { googleConfigured: boolean }) {
   }
 
   return (
-    <AuthShell eyebrow="WELCOME BACK" title="Sign in to your account." description="Access your profile, release history, and protected downloads.">
+    <AuthShell authAvailable={authAvailable} eyebrow="WELCOME BACK" title="Sign in to your account." description="Access your profile, release history, and protected downloads.">
       <form className="auth-form" onSubmit={submit}>
         <label>Email address<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
         <label>Password<span className="password-input"><input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /><Link href="/forgot-password" aria-label="Reset password"><LockKeyhole size={15} /></Link></span></label>
         {error && <p className="auth-message error" role="alert">{error}</p>}
-        <button className="auth-submit" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"} <ArrowRight size={16} /></button>
+        <button className="auth-submit" type="submit" disabled={!authAvailable || busy}>{busy ? "Signing in…" : "Sign in"} <ArrowRight size={16} /></button>
       </form>
       <div className="auth-or"><span />OR<span /></div>
-      <button className="auth-google" type="button" disabled={busy} onClick={() => void continueWithGoogle()}><b>G</b> {busy ? "Connecting to Google…" : "Continue with Google"}</button>
+      <button className="auth-google" type="button" disabled={!authAvailable || busy} onClick={() => void continueWithGoogle()}><b>G</b> {busy ? "Connecting to Google…" : "Continue with Google"}</button>
       {googleError && <p className="auth-message error" role="alert">{googleError}</p>}
       <p className="auth-switch">New to PrivSentinel? <Link href="/register">Create an account</Link></p>
     </AuthShell>

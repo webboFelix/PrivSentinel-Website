@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { getDb } from "@/db";
 import { profileDetails, profiles } from "@/db/schema";
-import { getAuth } from "@/lib/auth";
+import { getPrincipal } from "@/lib/authorization";
 import { getGitHubConfig } from "@/lib/env";
 import { canDownload } from "@/lib/permissions";
 import { latestPublishedRelease, recordDownload } from "@/services/release-service";
@@ -18,21 +18,21 @@ export async function GET(request: Request) {
     return Response.json({ error: "Request origin could not be verified." }, { status: 403, headers: jsonHeaders });
   }
 
-  const session = await getAuth().api.getSession({ headers: request.headers });
-  if (!session) {
+  const principal = await getPrincipal(request.headers);
+  if (!principal) {
     return Response.json({ error: "Authentication is required.", loginUrl: "/login?next=%2Fapi%2Fdownloads%2Flatest" }, { status: 401, headers: jsonHeaders });
   }
 
-  if (!(await enforceRateLimit(request, `download:${session.user.id}`, 5, 3600))) {
+  if (!(await enforceRateLimit(request, `download:${principal.actor.id}`, 5, 3600))) {
     return Response.json({ error: "Download limit reached. Try again later." }, { status: 429, headers: jsonHeaders });
   }
 
   const [profile, profileDetailsRow] = await Promise.all([
     getDb().query.profiles.findFirst({
-      where: eq(profiles.userId, session.user.id),
+      where: eq(profiles.userId, principal.actor.id),
     }),
     getDb().query.profileDetails.findFirst({
-      where: eq(profileDetails.userId, session.user.id),
+      where: eq(profileDetails.userId, principal.actor.id),
     }),
   ]);
   if (!canDownload(profile ? { ...profile, gender: profileDetailsRow?.gender } : null)) {
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
     return Response.json({ error: "The installer download is temporarily unavailable." }, { status: 502, headers: jsonHeaders });
   }
 
-  await recordDownload({ userId: session.user.id, release });
+  await recordDownload({ userId: principal.actor.id, release });
   const safeName = installer.name.replace(/["\\\r\n]/g, "_");
   return new Response(upstream.body, {
     status: 200,

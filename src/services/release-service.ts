@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { releases as releaseTable } from "@/db/schema";
+import { releaseOverrides, releases as releaseTable } from "@/db/schema";
 import { getServerEnv } from "@/lib/env";
 import {
   getAllReleases,
-  getLatestRelease,
   getReleaseByVersion,
   type PublishedRelease,
 } from "@/lib/github";
@@ -47,19 +46,41 @@ export async function persistReleases(items: PublishedRelease[]) {
 export async function refreshReleaseCache() {
   const items = await getAllReleases();
   await persistReleases(items);
-  return items;
+  return applyReleaseOverrides(items, false);
 }
 
 export async function latestPublishedRelease() {
-  const latest = await getLatestRelease();
-  if (latest) await persistReleases([latest]);
-  return latest;
+  const items = await getAllReleases();
+  await persistReleases(items);
+  return (await applyReleaseOverrides(items, false))[0] ?? null;
 }
 
 export async function publishedReleaseByVersion(version: string) {
   const release = await getReleaseByVersion(version);
-  if (release) await persistReleases([release]);
-  return release;
+  if (!release) return null;
+  await persistReleases([release]);
+  return (await applyReleaseOverrides([release], false))[0] ?? null;
+}
+
+export async function releasesForAdministration() {
+  const items = await getAllReleases();
+  await persistReleases(items);
+  return applyReleaseOverrides(items, true);
+}
+
+async function applyReleaseOverrides(items: PublishedRelease[], includeUnpublished: boolean) {
+  if (!items.length || !isDatabaseConfigured()) return items;
+  const overrides = await getDb().select().from(releaseOverrides);
+  const overridesByTag = new Map(overrides.map((override) => [override.tagName, override]));
+  return items.flatMap((item) => {
+    const override = overridesByTag.get(item.tagName);
+    if (override && !override.isPublished && !includeUnpublished) return [];
+    return [{
+      ...item,
+      name: override?.releaseName ?? item.name,
+      body: override?.releaseNotes ?? item.body,
+    }];
+  });
 }
 
 export async function recordDownload(input: {

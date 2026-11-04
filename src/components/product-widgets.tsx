@@ -28,8 +28,20 @@ export type Release = {
   installer: ReleaseAsset | null;
 };
 type ReleasesResponse = { latest: Release | null; history: Release[]; error?: string };
-type Testimonial = { id: string; name: string; location: string | null; quote: string; rating: number };
+type Testimonial = {
+  id: string;
+  name: string;
+  designation: string | null;
+  title: string;
+  message: string;
+  rating: number;
+  submittedAt: string;
+};
 type TestimonialFailure = { code?: string; error?: string };
+type TestimonialResponse = {
+  reviews: Testimonial[];
+  summary: { count: number; average: number };
+};
 
 function bytes(value: number) {
   return value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
@@ -65,12 +77,13 @@ function isTestimonial(value: unknown): value is Testimonial {
   const record = value as Record<string, unknown>;
   return typeof record.id === "string" &&
     typeof record.name === "string" &&
-    (typeof record.location === "string" || record.location === null) &&
-    typeof record.quote === "string" &&
+    (typeof record.designation === "string" || record.designation === null) &&
+    typeof record.title === "string" &&
+    typeof record.message === "string" &&
     typeof record.rating === "number" &&
     Number.isInteger(record.rating) &&
-    record.rating >= 1 &&
-    record.rating <= 5;
+    record.rating >= 1 && record.rating <= 5 &&
+    typeof record.submittedAt === "string";
 }
 
 export function DemoPlayer({ videoUrl, compact = false }: { videoUrl: string; compact?: boolean }) {
@@ -260,6 +273,7 @@ function ConfiguredInstallerAccessLink({ tagName, size }: { tagName: string; siz
 
 export function TestimonialPreview() {
   const [reviews, setReviews] = useState<Testimonial[] | null>(null);
+  const [summary, setSummary] = useState<TestimonialResponse["summary"] | null>(null);
   const [failure, setFailure] = useState("");
   const [refresh, setRefresh] = useState(0);
 
@@ -273,11 +287,16 @@ export function TestimonialPreview() {
           return;
         }
         const result = await response.json() as unknown;
-        if (!Array.isArray(result) || !result.every(isTestimonial)) {
+        if (typeof result !== "object" || result === null || !("reviews" in result) ||
+            !Array.isArray(result.reviews) || !result.reviews.every(isTestimonial) ||
+            !("summary" in result) || typeof result.summary !== "object" || result.summary === null ||
+            !("count" in result.summary) || !Number.isInteger(result.summary.count) ||
+            !("average" in result.summary) || typeof result.summary.average !== "number") {
           setFailure("The testimonial response was invalid. Please try again.");
           return;
         }
-        setReviews(result);
+        setReviews(result.reviews);
+        setSummary(result.summary as TestimonialResponse["summary"]);
         setFailure("");
       })
       .catch((error: unknown) => {
@@ -295,13 +314,16 @@ export function TestimonialPreview() {
       <p>Feedback from the PrivSentinel community.</p>
       {failure ? <div className="testimonial-empty-state" role="alert"><p className="testimonial-empty">{failure}</p><button type="button" className="state-retry-button" onClick={() => { setFailure(""); setReviews(null); setRefresh((value) => value + 1); }}>Try again</button></div> :
         reviews === null ? <TestimonialLoadingSkeleton /> :
-          reviews.length === 0 ? <p className="testimonial-empty" role="status">No approved testimonials yet. Check back later.</p> :
-            <div className="testimonial-stack">{reviews.slice(0, 3).map((review) => (
+          reviews.length === 0 ? <p className="testimonial-empty" role="status">No approved reviews yet. Check back later.</p> :
+            <><p className="testimonial-rating-summary" aria-label={`${summary?.average.toFixed(1) ?? "0.0"} average from ${summary?.count ?? 0} approved reviews`}>
+              <span aria-hidden="true">{"★".repeat(Math.round(summary?.average ?? 0))}</span>
+              {summary?.average.toFixed(1)} average · {summary?.count} approved {summary?.count === 1 ? "review" : "reviews"}
+            </p><div className="testimonial-stack">{reviews.slice(0, 3).map((review) => (
               <article className="testimonial-card" key={review.id}>
                 <span className="testimonial-avatar" aria-hidden="true">{review.name.slice(0, 1).toUpperCase()}</span>
-                <div><div className="testimonial-stars" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}</div><blockquote>“{review.quote}”</blockquote><strong>— {review.name}{review.location ? `, ${review.location}` : ""}</strong></div>
+                <div><div className="testimonial-stars" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}</div><h3>{review.title}</h3><blockquote>“{review.message}”</blockquote><strong>— {review.name}{review.designation ? `, ${review.designation}` : ""}</strong><time dateTime={review.submittedAt}>{releaseDate(review.submittedAt)}</time></div>
               </article>
-            ))}</div>}
+            ))}</div></>}
       <Link className="testimonial-link" href="/about">About PrivSentinel <ArrowRight size={13} /></Link>
     </section>
   );

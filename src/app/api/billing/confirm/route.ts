@@ -4,7 +4,7 @@ import { z } from "zod";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
 import { auditLogs, billingCustomers, paymentMethods } from "@/db/schema";
-import { getAuth } from "@/lib/auth";
+import { getPrincipal } from "@/lib/authorization";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
 import { getStripe } from "@/lib/stripe";
 
@@ -22,9 +22,9 @@ export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
     return Response.json({ error: "Request origin could not be verified." }, { status: 403 });
   }
-  const session = await getAuth().api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "Sign in to confirm your payment method." }, { status: 401 });
-  if (!(await enforceRateLimit(request, `billing-confirm:${session.user.id}`, 10, 900))) {
+  const principal = await getPrincipal(request.headers);
+  if (!principal) return Response.json({ error: "Sign in to confirm your payment method." }, { status: 401 });
+  if (!(await enforceRateLimit(request, `billing-confirm:${principal.actor.id}`, 10, 900))) {
     return Response.json({ error: "Too many confirmation attempts. Try again later." }, { status: 429 });
   }
 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
 
   const db = getDb();
   const billingCustomer = await db.query.billingCustomers.findFirst({
-    where: eq(billingCustomers.userId, session.user.id),
+    where: eq(billingCustomers.userId, principal.actor.id),
   });
   if (!billingCustomer) return Response.json({ error: "No billing profile exists for this account." }, { status: 404 });
 
@@ -54,8 +54,8 @@ export async function POST(request: Request) {
     if (
       checkout.mode !== "setup" ||
       checkout.status !== "complete" ||
-      checkout.client_reference_id !== session.user.id ||
-      checkout.metadata?.userId !== session.user.id ||
+      checkout.client_reference_id !== principal.actor.id ||
+      checkout.metadata?.userId !== principal.actor.id ||
       objectId(checkout.customer) !== billingCustomer.stripeCustomerId
     ) {
       return Response.json({ error: "This card setup could not be verified for your account." }, { status: 400 });
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     if (
       !setupIntent ||
       setupIntent.status !== "succeeded" ||
-      setupIntent.metadata?.userId !== session.user.id ||
+      setupIntent.metadata?.userId !== principal.actor.id ||
       objectId(setupIntent.customer) !== billingCustomer.stripeCustomerId
     ) {
       return Response.json({ error: "The payment provider has not verified this card setup." }, { status: 400 });
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
   try {
     await db.insert(paymentMethods).values({
       ...verifiedCard,
-      userId: session.user.id,
+      userId: principal.actor.id,
     }).onConflictDoUpdate({
       target: paymentMethods.id,
       set: {
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
     });
     await db.insert(auditLogs).values({
       id: randomUUID(),
-      userId: session.user.id,
+      userId: principal.actor.id,
       action: "billing.card_setup.completed",
       resource: "billing.payment_method",
       metadata: JSON.stringify({ brand: verifiedCard.brand, last4: verifiedCard.last4 }),

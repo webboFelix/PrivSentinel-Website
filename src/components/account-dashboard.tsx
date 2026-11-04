@@ -18,6 +18,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { TestimonialForm } from "@/components/testimonial-form";
 
 type Profile = {
   fullName: string;
@@ -51,6 +52,8 @@ export function AccountDashboard() {
   const [billingBusy, setBillingBusy] = useState(false);
   const [billingError, setBillingError] = useState("");
   const [billingNotice, setBillingNotice] = useState("");
+  const [accountRole, setAccountRole] = useState("user");
+  const [accountStatus, setAccountStatus] = useState("active");
 
   useEffect(() => {
     if (isPending) return;
@@ -73,6 +76,8 @@ export function AccountDashboard() {
       }),
     ]).then(async ([profileData, historyData, billingData]) => {
       const current = (profileData as { profile: Profile | null }).profile;
+      setAccountRole((profileData as { role?: string }).role ?? "user");
+      setAccountStatus((profileData as { status?: string }).status ?? "active");
       setProfile(current);
       setFullName(current?.fullName ?? session.user.name ?? "");
       setPhoneNumber(current?.phoneNumber ?? "");
@@ -133,8 +138,10 @@ export function AccountDashboard() {
       }
       const refreshed = await fetch("/api/profile");
       if (refreshed.ok) {
-        const result = await refreshed.json() as { profile: Profile | null };
+        const result = await refreshed.json() as { profile: Profile | null; role?: string; status?: string };
         setProfile(result.profile);
+        setAccountRole(result.role ?? "user");
+        setAccountStatus(result.status ?? "active");
         setPhoneNumber(result.profile?.phoneNumber ?? "");
         setFullName(result.profile?.fullName ?? fullName);
         setGender(result.profile?.gender ?? "");
@@ -232,7 +239,7 @@ export function AccountDashboard() {
       </header>
       <div className="account-main">
         <Link className="account-back" href="/"><ArrowLeft size={14} /> Back to home</Link>
-        <div className="account-welcome"><div><span className="section-kicker">ACCOUNT OVERVIEW</span><h1>Welcome back, {profile?.fullName || session.user.name?.split(" ")[0] || "there"}.</h1><p>Manage your PrivSentinel account and protected downloads.</p></div><div className="account-shield">{avatar ? <Image className="account-avatar-image" src={avatar} alt="Your profile avatar" width={53} height={53} unoptimized /> : <ShieldCheck size={26} />}</div></div>
+        <div className="account-welcome"><div><span className="section-kicker">ACCOUNT OVERVIEW</span><h1>Welcome back, {profile?.fullName || session.user.name?.split(" ")[0] || "there"}.</h1><p>Manage your PrivSentinel account and protected downloads.</p><div className="account-badges"><span>Role: {accountRole.replace("_", " ")}</span><span className={`admin-status is-${accountStatus}`}>Status: {accountStatus}</span>{(accountRole === "admin" || accountRole === "super_admin") && <Link href="/admin">Open administration</Link>}</div></div><div className="account-shield">{avatar ? <Image className="account-avatar-image" src={avatar} alt="Your profile avatar" width={53} height={53} unoptimized /> : <ShieldCheck size={26} />}</div></div>
         {!loading && (!profile?.phoneNumber || !profile.gender) && <div className="profile-required" role="status"><ShieldCheck size={17} /> Add your phone number and select your gender to complete your profile and enable downloads.</div>}
         {error && <p className="account-message error" role="alert">{error}</p>}
         {notice && <p className="account-message success" role="status"><CheckCircle2 size={16} /> {notice}</p>}
@@ -264,6 +271,14 @@ export function AccountDashboard() {
             </section>
           </div>
         )}
+        {!loading && <TestimonialForm />}
+        {!loading && <section className="account-panel account-security-panel">
+          <div className="account-panel-heading"><span className="account-panel-icon"><ShieldCheck size={18} /></span><div><h2>Security settings</h2><p>Review and update your sign-in security</p></div></div>
+          <div className="account-detail"><span>Account status</span><strong>{accountStatus}</strong></div>
+          <div className="account-detail"><span>Authentication</span><strong>{session.user.email}</strong></div>
+          <p className="billing-security-note">To change or reset your password, use the verified email flow. Google sign-in accounts can continue managing access through their Google account.</p>
+          <Link className="admin-secondary-button" href="/forgot-password">Reset password</Link>
+        </section>}
         {!loading && <section className="account-panel billing-panel">
           <div className="account-panel-heading"><span className="account-panel-icon"><CreditCard size={18} /></span><div><h2>Billing cards</h2><p>Verify and save a Visa or other supported card</p></div></div>
           <p className="billing-security-note">Card details are entered on Stripe’s secure page. PrivSentinel never receives or stores your card number or security code. Adding a card does not charge it.</p>

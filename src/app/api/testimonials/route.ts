@@ -1,7 +1,25 @@
-import { desc, isNotNull } from "drizzle-orm";
+import { and, avg, count, desc, eq, gte, lte, ne } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { connection } from "next/server";
-import { getDb } from "@/db";
+import { ensureDatabaseSchema, getDb } from "@/db";
 import { testimonials } from "@/db/schema";
+import { getPrincipal, recordAudit } from "@/lib/authorization";
+import { getServerEnv } from "@/lib/env";
+import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
+import { diagnoseWorkerOperation } from "@/lib/worker-diagnostics";
+
+export const testimonialSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  title: z.string().trim().min(3).max(100),
+  message: z.string().trim().min(20).max(2_000),
+  designation: z.string().trim().max(100).optional().transform((value) => value || null),
+  publicConsent: z.boolean(),
+  displayNameConsent: z.boolean(),
+}).strict().refine((value) => !value.displayNameConsent || value.publicConsent, {
+  path: ["displayNameConsent"],
+  message: "Allow public display before choosing to show your name.",
+});
 
 function errorResponse(code: string, message: string, status = 503) {
   return Response.json({ code, error: message }, {
@@ -12,32 +30,118 @@ function errorResponse(code: string, message: string, status = 503) {
 
 export async function GET() {
   await connection();
-  if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
+  const env = getServerEnv();
+  if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) {
     return errorResponse("not_configured", "Testimonials are not configured yet. Please check back later.");
   }
+  await diagnoseWorkerOperation("testimonials.schema.initialize", ensureDatabaseSchema);
 
-  try {
-    const records = await getDb().select({
-      id: testimonials.id,
-      name: testimonials.name,
-      location: testimonials.location,
-      quote: testimonials.quote,
-      rating: testimonials.rating,
-    }).from(testimonials)
-      .where(isNotNull(testimonials.approvedAt))
-      .orderBy(desc(testimonials.approvedAt))
-      .limit(5);
+  const db = getDb();
+  const approved = and(
+    eq(testimonials.status, "approved"),
+    eq(testimonials.publicConsent, true),
+    gte(testimonials.rating, 1),
+    lte(testimonials.rating, 5),
+    ne(testimonials.title, ""),
+    ne(testimonials.quote, ""),
+  );
+  const [records, [aggregate]] = await diagnoseWorkerOperation("testimonials.public.read", () =>
+    Promise.all([
+      db.select({
+        id: testimonials.id,
+        name: testimonials.name,
+        displayNameConsent: testimonials.displayNameConsent,
+        designation: testimonials.designation,
+        title: testimonials.title,
+        message: testimonials.quote,
+        rating: testimonials.rating,
+        submittedAt: testimonials.createdAt,
+      }).from(testimonials)
+        .where(approved)
+        .orderBy(desc(testimonials.approvedAt))
+        .limit(12),
+      db.select({
+        count: count(),
+        average: avg(testimonials.rating),
+      }).from(testimonials).where(approved),
+    ]),
+  );
+  return Response.json({
+    reviews: records.filter((review) =>
+      Number.isInteger(review.rating) && review.rating >= 1 && review.rating <= 5 &&
+      review.title.trim().length > 0 && review.message.trim().length > 0,
+    ).map(({ displayNameConsent, ...review }) => ({
+      ...review,
+      name: displayNameConsent ? review.name : "PrivSentinel user",
+    })),
+    summary: {
+      count: aggregate?.count ?? 0,
+      average: Number(aggregate?.average ?? 0),
+    },
+  }, { headers: { "Cache-Control": "no-store" } });
+}
 
-    return Response.json(records.filter((record) =>
-      Number.isInteger(record.rating) && record.rating >= 1 && record.rating <= 5 &&
-      record.name.trim().length > 0 && record.quote.trim().length > 0,
-    ), {
-      headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=240" },
-    });
-  } catch (error) {
-    if (error instanceof Error && /no such table:\s*(?:(?:main|public)\.)?["`]?testimonials["`]?(?:\s|$)/i.test(error.message)) {
-      return errorResponse("not_ready", "Testimonials are being set up. Please check back later.");
-    }
-    return errorResponse("temporarily_unavailable", "Approved testimonials could not be loaded. Please try again.");
+export async function POST(request: Request) {
+  await connection();
+  await ensureDatabaseSchema();
+  if (!isSameOriginRequest(request)) {
+    return Response.json({ error: "Request origin could not be verified." }, { status: 403 });
   }
+  const principal = await getPrincipal(request.headers);
+  if (!principal) return Response.json({ error: "Sign in to share your experience." }, { status: 401 });
+  if (!(await enforceRateLimit(request, `testimonial:${principal.actor.id}`, 5, 3600))) {
+    return Response.json({ error: "Too many review submissions. Try again later." }, { status: 429 });
+  }
+
+  let input: unknown;
+  try {
+    input = await request.json();
+  } catch {
+    return Response.json({ error: "Provide a valid testimonial." }, { status: 400 });
+  }
+  const parsed = testimonialSchema.safeParse(input);
+  if (!parsed.success) {
+    return Response.json({
+      error: "Review the rating and testimonial details.",
+      fields: parsed.error.flatten().fieldErrors,
+    }, { status: 400 });
+  }
+
+  const db = getDb();
+  const existing = await db.query.testimonials.findFirst({
+    columns: { id: true },
+    where: eq(testimonials.userId, principal.actor.id),
+  });
+  if (existing) {
+    return Response.json({ error: "You already have a review. Edit your existing submission instead." }, { status: 409 });
+  }
+
+  const review = {
+    id: randomUUID(),
+    name: principal.actor.name,
+    location: null,
+    quote: parsed.data.message,
+    title: parsed.data.title,
+    userId: principal.actor.id,
+    designation: parsed.data.designation,
+    publicConsent: parsed.data.publicConsent,
+    displayNameConsent: parsed.data.publicConsent && parsed.data.displayNameConsent,
+    status: "pending",
+    rating: parsed.data.rating,
+    approvedAt: null,
+    reviewedBy: null,
+    reviewedAt: null,
+  } as const;
+  await db.insert(testimonials).values(review);
+  await recordAudit({
+    actorId: principal.actor.id,
+    action: "testimonial.submitted",
+    resource: "testimonial",
+    targetType: "testimonial",
+    targetId: review.id,
+  });
+  return Response.json({
+    testimonial: { ...review, submittedAt: new Date().toISOString() },
+    status: "pending",
+  }, { status: 201, headers: { "Cache-Control": "no-store" } });
 }

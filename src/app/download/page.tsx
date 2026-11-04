@@ -1,6 +1,7 @@
 import { DownloadPage } from "@/components/content-pages";
+import { getAuthConfigurationStatus } from "@/lib/env";
 
 export default function DownloadRoute() {
-  const authAvailable = Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
+  const authAvailable = getAuthConfigurationStatus().available;
   return <DownloadPage authAvailable={authAvailable} />;
 }
