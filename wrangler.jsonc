@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "my-app",
+  "name": "privsentinel",
   "main": ".open-next/worker.js",
   "upload_source_maps": true,
   // Set this to today's date
