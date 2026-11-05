@@ -6,7 +6,7 @@ import { getPrincipal, recordAudit } from "@/lib/authorization";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
 import { testimonialSchema } from "../route";
 
-export async function PATCH(request: Request, context: RouteContext<"/api/testimonials/[id]">) {
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   await connection();
   await ensureDatabaseSchema();
   if (!isSameOriginRequest(request)) {
@@ -69,7 +69,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/testim
   });
 }
 
-export async function DELETE(request: Request, context: RouteContext<"/api/testimonials/[id]">) {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   await connection();
   await ensureDatabaseSchema();
   if (!isSameOriginRequest(request)) {

@@ -14,7 +14,7 @@ const changeSchema = z.object({
   reason: z.string().trim().max(300).optional(),
 }).strict().refine((value) => Number(value.role !== undefined) + Number(value.suspended !== undefined) === 1);
 
-export async function GET(request: Request, context: RouteContext<"/api/admin/users/[id]">) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   await connection();
   await ensureDatabaseSchema();
   const principal = await requireAdminApi(request);
@@ -85,7 +85,7 @@ export async function GET(request: Request, context: RouteContext<"/api/admin/us
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function PATCH(request: Request, context: RouteContext<"/api/admin/users/[id]">) {
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   await connection();
   await ensureDatabaseSchema();
   if (!isSameOriginRequest(request)) {

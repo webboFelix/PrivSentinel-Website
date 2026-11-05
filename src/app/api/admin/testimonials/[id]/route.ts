@@ -11,7 +11,7 @@ const moderationSchema = z.object({
   status: z.enum(["approved", "rejected"]),
 }).strict();
 
-export async function PATCH(request: Request, context: RouteContext<"/api/admin/testimonials/[id]">) {
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   await connection();
   await ensureDatabaseSchema();
   if (!isSameOriginRequest(request)) {
