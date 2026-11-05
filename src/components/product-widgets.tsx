@@ -3,11 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CirclePlay,
   Download,
   Maximize,
@@ -21,6 +23,7 @@ import { useHydrated } from "@/hooks/use-hydrated";
 import { useProfileQuery } from "@/hooks/use-profile";
 import { useReleaseQuery, useReleasesQuery } from "@/hooks/use-releases";
 import { usePublicTestimonialsQuery } from "@/hooks/use-testimonials";
+import { formatTimeAgo } from "@/lib/time-ago";
 
 function bytes(value: number) {
   return value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
@@ -192,6 +195,35 @@ export function TestimonialPreview() {
   const testimonialsQuery = usePublicTestimonialsQuery();
   const reviews = testimonialsQuery.data?.reviews ?? [];
   const summary = testimonialsQuery.data?.summary;
+  const [activeReview, setActiveReview] = useState(0);
+  const [rotationPaused, setRotationPaused] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [hasFocus, setHasFocus] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const isRotationPaused = rotationPaused || isHovered || hasFocus || reducedMotion;
+
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setReducedMotion(preference.matches);
+    updatePreference();
+    preference.addEventListener("change", updatePreference);
+    return () => preference.removeEventListener("change", updatePreference);
+  }, []);
+
+  useEffect(() => {
+    if (reviews.length < 2 || isRotationPaused) return;
+    const timer = window.setInterval(() => {
+      setActiveReview((current) => (current + 1) % reviews.length);
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [isRotationPaused, reviews.length]);
+
+  function showReview(index: number) {
+    setActiveReview((index + reviews.length) % reviews.length);
+  }
+
+  const currentIndex = Math.min(activeReview, Math.max(reviews.length - 1, 0));
+  const currentReview = reviews[currentIndex];
 
   return (
     <section className="testimonial-preview" aria-labelledby="testimonial-title">
@@ -203,17 +235,42 @@ export function TestimonialPreview() {
             <><p className="testimonial-rating-summary" aria-label={`${summary?.average.toFixed(1) ?? "0.0"} average from ${summary?.count ?? 0} approved reviews`}>
               <span aria-hidden="true">{"★".repeat(Math.round(summary?.average ?? 0))}</span>
               {summary?.average.toFixed(1)} average · {summary?.count} approved {summary?.count === 1 ? "review" : "reviews"}
-            </p><div className="testimonial-stack">{reviews.slice(0, 3).map((review) => (
-              <article className="testimonial-card" key={review.id}>
-                <span className="testimonial-avatar" aria-hidden="true">{review.avatar
-                  ? <Image src={review.avatar} alt="" width={42} height={42} unoptimized />
-                  : review.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
-                <div><div className="testimonial-stars" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}</div><h3>{review.title}</h3><blockquote>“{review.message}”</blockquote><strong>— {review.name}{review.designation ? `, ${review.designation}` : ""}</strong><time dateTime={review.submittedAt}>{releaseDate(review.submittedAt)}</time></div>
-              </article>
-            ))}</div></>}
+            </p><div className="testimonial-carousel"
+              onMouseEnter={() => setIsHovered(true)}
+              onMouseLeave={() => setIsHovered(false)}
+              onFocusCapture={() => setHasFocus(true)}
+              onBlurCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setHasFocus(false);
+              }}
+            ><div className="testimonial-stack" aria-live={isRotationPaused ? "polite" : "off"} aria-atomic="true">
+              {currentReview && <article className="testimonial-card" key={currentReview.id}>
+                <span className="testimonial-avatar" aria-hidden="true">{currentReview.avatar
+                  ? <Image src={currentReview.avatar} alt="" width={42} height={42} unoptimized />
+                  : currentReview.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
+                <div><div className="testimonial-stars" aria-label={`${currentReview.rating} out of 5 stars`}>{"★".repeat(currentReview.rating)}</div><h3>{currentReview.title}</h3><blockquote>“{currentReview.message}”</blockquote><strong>— {currentReview.name}{currentReview.designation ? `, ${currentReview.designation}` : ""}</strong><RelativeTime value={currentReview.submittedAt} /></div>
+              </article>}
+            </div>{reviews.length > 1 && <div className="testimonial-controls">
+              <button type="button" className="testimonial-control-button" aria-label="Previous testimonial" onClick={() => showReview(currentIndex - 1)}><ChevronLeft size={14} /></button>
+              <div className="testimonial-pagination" aria-label="Choose a testimonial">
+                {reviews.map((review, index) => <button key={review.id} type="button" className={`testimonial-indicator${index === currentIndex ? " is-active" : ""}`} aria-label={`Show testimonial ${index + 1}`} aria-current={index === currentIndex ? "true" : undefined} onClick={() => showReview(index)} />)}
+              </div>
+              <button type="button" className="testimonial-control-button" aria-label="Next testimonial" onClick={() => showReview(currentIndex + 1)}><ChevronRight size={14} /></button>
+              <button type="button" className="testimonial-control-button testimonial-rotation-button" disabled={reducedMotion} aria-label={reducedMotion ? "Automatic rotation is disabled by your reduced-motion setting" : rotationPaused ? "Resume automatic testimonial rotation" : "Pause automatic testimonial rotation"} onClick={() => setRotationPaused((paused) => !paused)}>{rotationPaused || reducedMotion ? <Play size={12} /> : <Pause size={12} />}</button>
+            </div>}</div></>}
       <Link className="testimonial-link" href="/about">About PrivSentinel <ArrowRight size={13} /></Link>
     </section>
   );
+}
+
+function RelativeTime({ value }: { value: string }) {
+  const [now, setNow] = useState(Date.now);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return <time dateTime={value} title={releaseDate(value)}>{now ? formatTimeAgo(value, now) : releaseDate(value)}</time>;
 }
 
 function TestimonialLoadingSkeleton() {
