@@ -5,6 +5,7 @@ import { AdminAccessDenied } from "@/components/admin-access-denied";
 import { SuperAdminBootstrap } from "@/components/super-admin-bootstrap";
 import { ensureDatabaseSchema, getLibsqlClient } from "@/db";
 import { getPrincipal } from "@/lib/authorization";
+import { isAdminBootstrapInitialized } from "@/lib/admin-bootstrap";
 import { getServerEnv } from "@/lib/env";
 
 export const metadata = {
@@ -33,13 +34,18 @@ async function BootstrapContent() {
   await ensureDatabaseSchema();
   const [bootstrap, superAdministrator] = await Promise.all([
     getLibsqlClient().execute({
-      sql: `SELECT "completedAt" FROM "admin_bootstrap" WHERE "id" = 'initial-super-admin'`,
+      sql: `SELECT "completedAt", "completedBy" FROM "admin_bootstrap" WHERE "id" = 'initial-super-admin'`,
     }),
     getLibsqlClient().execute({
       sql: `SELECT "id" FROM "user" WHERE "role" = 'super_admin' LIMIT 1`,
     }),
   ]);
-  const isInitialized = bootstrap.rows[0]?.completedAt != null || superAdministrator.rows.length > 0;
+  const marker = bootstrap.rows[0];
+  const isInitialized = isAdminBootstrapInitialized({
+    hasCompletionTimestamp: marker?.completedAt != null,
+    hasCompletingAccount: marker?.completedBy != null,
+    hasSuperAdministrator: superAdministrator.rows.length > 0,
+  });
 
   return (
     <SuperAdminBootstrap

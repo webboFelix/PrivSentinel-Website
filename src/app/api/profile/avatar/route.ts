@@ -78,11 +78,7 @@ export async function POST(request: Request) {
     if (current?.avatar?.startsWith("https://res.cloudinary.com/")) {
       try {
         await deleteProfileAvatar(principal.actor.id);
-      } catch (error) {
-        console.error("[cloudinary]", {
-          operation: "avatar-remove",
-          error: error instanceof Error ? error.message : "Unknown Cloudinary error.",
-        });
+      } catch {
         return Response.json({ error: "Profile image could not be removed from Cloudinary. Please try again." }, { status: 502 });
       }
     }
@@ -118,13 +114,8 @@ export async function POST(request: Request) {
     imageUrl = await uploadProfileAvatar(principal.actor.id, bytes, `image/${match[1]}`);
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Cloudinary is not configured.")) {
-      console.error("[cloudinary]", { operation: "avatar-upload", error: error.message });
       return Response.json({ error: "Profile image storage is not configured. Please contact the site administrator." }, { status: 503 });
     }
-    console.error("[cloudinary]", {
-      operation: "avatar-upload",
-      error: error instanceof Error ? error.message : "Unknown Cloudinary error.",
-    });
     return Response.json({ error: "Profile image could not be uploaded. Please try again." }, { status: 502 });
   }
 

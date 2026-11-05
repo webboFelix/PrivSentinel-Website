@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getLibsqlClient } from "@/db";
 import { getPrincipal } from "@/lib/authorization";
+import { isAdminBootstrapInitialized } from "@/lib/admin-bootstrap";
 import { getServerEnv } from "@/lib/env";
 import { enforceRateLimit, enforceRateLimitBySubject, isSameOriginRequest } from "@/lib/rate-limit";
 
@@ -33,9 +34,17 @@ export async function POST(request: Request) {
   const transaction = await client.transaction("write");
   try {
     const bootstrap = await transaction.execute({
-      sql: `SELECT "completedAt" FROM "admin_bootstrap" WHERE "id" = 'initial-super-admin'`,
+      sql: `SELECT "completedAt", "completedBy" FROM "admin_bootstrap" WHERE "id" = 'initial-super-admin'`,
     });
-    if (bootstrap.rows[0]?.completedAt != null) {
+    const existing = await transaction.execute({
+      sql: `SELECT "id" FROM "user" WHERE "role" = 'super_admin' LIMIT 1`,
+    });
+    const marker = bootstrap.rows[0];
+    if (isAdminBootstrapInitialized({
+      hasCompletionTimestamp: marker?.completedAt != null,
+      hasCompletingAccount: marker?.completedBy != null,
+      hasSuperAdministrator: existing.rows.length > 0,
+    })) {
       await transaction.commit();
       return Response.json({ error: "Initial administrator setup has already been completed." }, { status: 409 });
     }
@@ -53,14 +62,6 @@ export async function POST(request: Request) {
       await transaction.rollback();
       return Response.json({ error: "Verify the designated account's email before setting up administrator access." }, { status: 403 });
     }
-    const existing = await transaction.execute({
-      sql: `SELECT "id" FROM "user" WHERE "role" = 'super_admin' LIMIT 1`,
-    });
-    if (existing.rows.length > 0 && String(existing.rows[0].id) !== principal.actor.id) {
-      await transaction.rollback();
-      return Response.json({ error: "A super administrator has already been configured." }, { status: 409 });
-    }
-
     if (String(targetAccount.role) !== "super_admin") {
       const promoted = await transaction.execute({
         sql: `UPDATE "user" SET "role" = 'super_admin', "updatedAt" = ?
