@@ -9,8 +9,11 @@ export const metadata: Metadata = {
   description:
     "PrivSentinel is a Windows-first endpoint security application. Explore product capabilities and access published releases.",
   icons: {
-    icon: "/PrivSentinel.png",
-    apple: "/PrivSentinel.png",
+    icon: [
+      { url: "/privsentinel-icon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/privsentinel-icon.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/privsentinel-apple-icon.png", sizes: "180x180", type: "image/png" }],
   },
 };
 
