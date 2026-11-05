@@ -39,11 +39,19 @@ export async function uploadProfileAvatar(userId: string, bytes: Buffer, mimeTyp
     body,
     signal: AbortSignal.timeout(15_000),
   });
-  const result: unknown = await response.json();
-  if (!response.ok || typeof result !== "object" || result === null || !("secure_url" in result) ||
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error(`Cloudinary upload returned an invalid response (HTTP ${response.status}).`);
+  }
+  if (!response.ok) {
+    throw new Error(`Cloudinary upload failed with HTTP ${response.status}.`);
+  }
+  if (typeof result !== "object" || result === null || !("secure_url" in result) ||
       typeof result.secure_url !== "string" ||
       !result.secure_url.startsWith(`https://res.cloudinary.com/${config.cloudName}/image/upload/`)) {
-    throw new Error("Cloudinary did not accept the profile image.");
+    throw new Error("Cloudinary upload response did not contain a valid secure image URL.");
   }
   return result.secure_url;
 }
@@ -64,10 +72,18 @@ export async function deleteProfileAvatar(userId: string) {
       body,
       signal: AbortSignal.timeout(15_000),
     });
-    const result: unknown = await response.json();
-    if (!response.ok || typeof result !== "object" || result === null ||
+    let result: unknown;
+    try {
+      result = await response.json();
+    } catch {
+      throw new Error(`Cloudinary image removal returned an invalid response (HTTP ${response.status}).`);
+    }
+    if (!response.ok) {
+      throw new Error(`Cloudinary image removal failed with HTTP ${response.status}.`);
+    }
+    if (typeof result !== "object" || result === null ||
         !("result" in result) || !["ok", "not found"].includes(String(result.result))) {
-      throw new Error("Cloudinary did not remove the profile image.");
+      throw new Error("Cloudinary image removal response was invalid.");
     }
   }
 }

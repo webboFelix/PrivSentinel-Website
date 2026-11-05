@@ -35,6 +35,7 @@ const serverEnvSchema = z.object({
     z.string().trim().email().optional(),
   ),
   GMAIL_APP_PASSWORD: optionalNonEmpty,
+  CLOUDINARY_URL: optionalNonEmpty,
   CLOUDINARY_CLOUD_NAME: optionalNonEmpty,
   CLOUDINARY_API_KEY: optionalNonEmpty,
   CLOUDINARY_API_SECRET: optionalNonEmpty,
@@ -96,16 +97,40 @@ export function getGitHubConfig() {
 }
 
 export function getCloudinaryConfig() {
+  const cloudinaryUrl = process.env.CLOUDINARY_URL?.trim();
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
   const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
   const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
-  if (!cloudName || !apiKey || !apiSecret) {
-    throw new Error("Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.");
+  const hasSeparateCredentials = Boolean(cloudName || apiKey || apiSecret);
+  if (hasSeparateCredentials) {
+    if (!cloudName || !apiKey || !apiSecret) {
+      throw new Error("Cloudinary credentials are incomplete. Set all of CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET, or set CLOUDINARY_URL.");
+    }
+    if (!/^[a-z0-9-]+$/i.test(cloudName)) throw new Error("CLOUDINARY_CLOUD_NAME is invalid.");
+    return { cloudName, apiKey, apiSecret };
   }
-  if (!/^[a-z0-9-]+$/i.test(cloudName)) throw new Error("CLOUDINARY_CLOUD_NAME is invalid.");
-  return {
-    cloudName,
-    apiKey,
-    apiSecret,
-  };
+  if (!cloudinaryUrl) {
+    throw new Error("Cloudinary is not configured. Set CLOUDINARY_URL or all of CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.");
+  }
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(cloudinaryUrl);
+  } catch {
+    throw new Error("CLOUDINARY_URL is invalid. Use cloudinary://API_KEY:API_SECRET@CLOUD_NAME.");
+  }
+  const urlCloudName = parsedUrl.hostname;
+  if (parsedUrl.protocol !== "cloudinary:" || !parsedUrl.username || !parsedUrl.password ||
+      !/^[a-z0-9-]+$/i.test(urlCloudName) || (parsedUrl.pathname !== "" && parsedUrl.pathname !== "/") ||
+      parsedUrl.search || parsedUrl.hash) {
+    throw new Error("CLOUDINARY_URL is invalid. Use cloudinary://API_KEY:API_SECRET@CLOUD_NAME.");
+  }
+  try {
+    return {
+      cloudName: urlCloudName,
+      apiKey: decodeURIComponent(parsedUrl.username),
+      apiSecret: decodeURIComponent(parsedUrl.password),
+    };
+  } catch {
+    throw new Error("CLOUDINARY_URL is invalid. Use cloudinary://API_KEY:API_SECRET@CLOUD_NAME.");
+  }
 }

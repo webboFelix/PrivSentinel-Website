@@ -82,18 +82,49 @@ describe("getAuthConfigurationStatus", () => {
   });
 
   it("requires the complete Cloudinary configuration before enabling uploads", () => {
+    vi.stubEnv("CLOUDINARY_URL", "");
     vi.stubEnv("CLOUDINARY_CLOUD_NAME", "test-cloud");
     vi.stubEnv("CLOUDINARY_API_KEY", "test-key");
     vi.stubEnv("CLOUDINARY_API_SECRET", "");
 
-    expect(() => getCloudinaryConfig()).toThrow("Cloudinary is not configured.");
+    expect(() => getCloudinaryConfig()).toThrow("Cloudinary credentials are incomplete.");
   });
 
   it("rejects malformed Cloudinary cloud names", () => {
+    vi.stubEnv("CLOUDINARY_URL", "");
     vi.stubEnv("CLOUDINARY_CLOUD_NAME", "invalid/cloud");
     vi.stubEnv("CLOUDINARY_API_KEY", "test-key");
     vi.stubEnv("CLOUDINARY_API_SECRET", "test-secret");
 
     expect(() => getCloudinaryConfig()).toThrow("CLOUDINARY_CLOUD_NAME is invalid.");
+  });
+
+  it("supports Cloudinary's standard CLOUDINARY_URL configuration", () => {
+    vi.stubEnv("CLOUDINARY_CLOUD_NAME", "");
+    vi.stubEnv("CLOUDINARY_API_KEY", "");
+    vi.stubEnv("CLOUDINARY_API_SECRET", "");
+    vi.stubEnv("CLOUDINARY_URL", "cloudinary://test-key:test-secret@test-cloud");
+
+    expect(getCloudinaryConfig()).toEqual({
+      cloudName: "test-cloud",
+      apiKey: "test-key",
+      apiSecret: "test-secret",
+    });
+  });
+
+  it("rejects malformed CLOUDINARY_URL without exposing its credentials", () => {
+    vi.stubEnv("CLOUDINARY_CLOUD_NAME", "");
+    vi.stubEnv("CLOUDINARY_API_KEY", "");
+    vi.stubEnv("CLOUDINARY_API_SECRET", "");
+    vi.stubEnv("CLOUDINARY_URL", "cloudinary://private-key:private-secret@invalid/cloud");
+
+    try {
+      getCloudinaryConfig();
+      expect.fail("Expected malformed Cloudinary URL to be rejected.");
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      expect(error.message).toBe("CLOUDINARY_URL is invalid. Use cloudinary://API_KEY:API_SECRET@CLOUD_NAME.");
+      expect(error.message).not.toContain("private");
+    }
   });
 });

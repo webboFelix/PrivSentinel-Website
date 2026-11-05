@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { Analytics } from "@vercel/analytics/next";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
 import { Providers } from "@/app/providers";
 import "./globals.css";
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {children}
           <SiteFooter />
         </Providers>
+        <Analytics />
       </body>
     </html>
   );
