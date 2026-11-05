@@ -7,7 +7,17 @@ import { FormEvent, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth-client";
 
-export function SuperAdminBootstrap({ email, emailVerified }: { email: string; emailVerified: boolean }) {
+export function SuperAdminBootstrap({
+  email,
+  emailVerified,
+  isInitialized,
+  isSuperAdministrator,
+}: {
+  email: string;
+  emailVerified: boolean;
+  isInitialized: boolean;
+  isSuperAdministrator: boolean;
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
@@ -61,20 +71,39 @@ export function SuperAdminBootstrap({ email, emailVerified }: { email: string; e
     <div className="auth-wrap">
       <Link href="/" className="auth-brand"><Image src="/PrivSentinel.png" alt="" width={42} height={42} className="auth-brand-logo" /><span className="brand-name">Priv<span>Sentinel</span></span></Link>
       <section className="auth-card">
-        <span className="auth-eyebrow">ONE-TIME SECURITY SETUP</span>
-        <h1>Initialize administrator access</h1>
-        <p className="auth-description">Only the signed-in, email-verified account designated by the server can initialize the first super administrator. This one-time setup is disabled after completion.</p>
-        {error && <p className="auth-message error" role="alert">{error}</p>}
-        {notice && <p className="auth-message success" role="status">{notice}</p>}
-        {!emailVerified
-          ? <div className="auth-form">
-              <p className="auth-description">Verify {email} first. We send a verification link to the address on your account.</p>
-              <button type="button" className="auth-submit" disabled={busy} onClick={() => void sendVerificationEmail()}>{busy ? "Sending…" : "Send verification email"}</button>
-            </div>
-          : <form className="auth-form" onSubmit={(event) => void submit(event)}>
-              <button type="submit" className="auth-submit" disabled={busy}>{busy ? "Checking account…" : "Initialize super administrator"}</button>
-            </form>}
-        <p className="auth-back-link"><Link href="/dashboard">Return to account</Link></p>
+        {isInitialized ? (
+          <>
+            <span className="auth-eyebrow">SETUP COMPLETE</span>
+            <h1>Administrator access is already initialized</h1>
+            <p className="auth-description">
+              {isSuperAdministrator
+                ? "This account is already set up as the super administrator. No further setup is needed."
+                : "One-time administrator setup has already been completed. It cannot be initialized again."}
+            </p>
+            <p className="auth-back-link">
+              <Link href={isSuperAdministrator ? "/admin" : "/dashboard"}>
+                {isSuperAdministrator ? "Go to admin dashboard" : "Return to account"}
+              </Link>
+            </p>
+          </>
+        ) : (
+          <>
+            <span className="auth-eyebrow">ONE-TIME SECURITY SETUP</span>
+            <h1>Initialize administrator access</h1>
+            <p className="auth-description">Only the signed-in, email-verified account designated by the server can initialize the first super administrator. This one-time setup is disabled after completion.</p>
+            {error && <p className="auth-message error" role="alert">{error}</p>}
+            {notice && <p className="auth-message success" role="status">{notice}</p>}
+            {!emailVerified
+              ? <div className="auth-form">
+                  <p className="auth-description">Verify {email} first. We send a verification link to the address on your account.</p>
+                  <button type="button" className="auth-submit" disabled={busy} onClick={() => void sendVerificationEmail()}>{busy ? "Sending…" : "Send verification email"}</button>
+                </div>
+              : <form className="auth-form" onSubmit={(event) => void submit(event)}>
+                  <button type="submit" className="auth-submit" disabled={busy}>{busy ? "Checking account…" : "Initialize super administrator"}</button>
+                </form>}
+            <p className="auth-back-link"><Link href="/dashboard">Return to account</Link></p>
+          </>
+        )}
       </section>
     </div>
   </main>;

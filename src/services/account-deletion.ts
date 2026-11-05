@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb, getLibsqlClient, ensureDatabaseSchema } from "@/db";
 import { billingCustomers, profileDetails } from "@/db/schema";
@@ -49,19 +50,28 @@ export async function cleanAccountDataBeforeDeletion(account: AccountToDelete, r
     "admin-user-update",
     "testimonial-moderation",
     "release-management",
-    "super-admin-bootstrap",
   ];
+  const subjectRateLimitScopes = ["email-verification", "super-admin-bootstrap"];
+  const subjectHash = createHash("sha256").update(account.id).digest("hex");
   const transaction = await getLibsqlClient().transaction("write");
   try {
+    await transaction.execute({
+      sql: `DELETE FROM "audit_logs"
+        WHERE "userId" = ?
+          OR ("targetType" = 'user' AND "targetId" = ?)
+          OR ("targetType" = 'testimonial' AND "targetId" IN (
+            SELECT "id" FROM "testimonials" WHERE "userId" = ?
+          ))`,
+      args: [account.id, account.id, account.id],
+    });
     await transaction.execute({ sql: `DELETE FROM "testimonials" WHERE "userId" = ?`, args: [account.id] });
     await transaction.execute({
-      sql: `DELETE FROM "audit_logs" WHERE "userId" = ? OR ("targetType" = 'user' AND "targetId" = ?)`,
-      args: [account.id, account.id],
-    });
-    await transaction.execute({
-      sql: `DELETE FROM "verification" WHERE "identifier" = ? OR "value" = ?`,
+      sql: `DELETE FROM "verification"
+        WHERE lower("identifier") = lower(?) OR "value" = ?`,
       args: [account.email, account.id],
     });
+    await transaction.execute({ sql: `DELETE FROM "account" WHERE "userId" = ?`, args: [account.id] });
+    await transaction.execute({ sql: `DELETE FROM "session" WHERE "userId" = ?`, args: [account.id] });
     await transaction.execute({ sql: `DELETE FROM "downloads" WHERE "userId" = ?`, args: [account.id] });
     await transaction.execute({ sql: `DELETE FROM "payment_methods" WHERE "userId" = ?`, args: [account.id] });
     await transaction.execute({ sql: `DELETE FROM "billing_customers" WHERE "userId" = ?`, args: [account.id] });
@@ -75,6 +85,12 @@ export async function cleanAccountDataBeforeDeletion(account: AccountToDelete, r
       await transaction.execute({
         sql: `DELETE FROM "rate_limits" WHERE substr("key", 1, ?) = ?`,
         args: [key.length, key],
+      });
+    }
+    for (const scope of subjectRateLimitScopes) {
+      await transaction.execute({
+        sql: `DELETE FROM "rate_limits" WHERE "key" = ?`,
+        args: [`${scope}:${subjectHash}`],
       });
     }
     await transaction.commit();

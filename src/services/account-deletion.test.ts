@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -65,6 +66,42 @@ describe("cleanAccountDataBeforeDeletion", () => {
     expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
       sql: expect.stringContaining('DELETE FROM "profile_details"'),
     }));
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining('DELETE FROM "account"'),
+      args: ["user-1"],
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining('DELETE FROM "session"'),
+      args: ["user-1"],
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining('DELETE FROM "verification"'),
+      args: ["person@example.com", "user-1"],
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining(`"targetType" = 'testimonial'`),
+      args: ["user-1", "user-1", "user-1"],
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith({
+      sql: `DELETE FROM "rate_limits" WHERE "key" = ?`,
+      args: [`email-verification:${createHash("sha256").update("user-1").digest("hex")}`],
+    });
+    expect(mocks.execute).toHaveBeenCalledWith({
+      sql: `DELETE FROM "rate_limits" WHERE "key" = ?`,
+      args: [`super-admin-bootstrap:${createHash("sha256").update("user-1").digest("hex")}`],
+    });
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining('UPDATE "release_overrides" SET "updatedBy" = NULL'),
+      args: ["user-1"],
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining('UPDATE "admin_bootstrap" SET "completedBy" = NULL'),
+      args: ["user-1"],
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining('UPDATE "session" SET "impersonatedBy" = NULL'),
+      args: ["user-1"],
+    }));
     expect(mocks.commit).toHaveBeenCalledOnce();
     expect(mocks.rollback).not.toHaveBeenCalled();
   });
@@ -90,5 +127,18 @@ describe("cleanAccountDataBeforeDeletion", () => {
 
     expect(mocks.findProfile).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it("rolls back local cleanup if any database deletion fails", async () => {
+    mocks.execute.mockRejectedValueOnce(new Error("database unavailable"));
+    const request = new Request("https://example.com/api/auth/delete-user", {
+      headers: { "x-account-delete-confirmation": "DELETE" },
+    });
+
+    await expect(cleanAccountDataBeforeDeletion({ id: "user-1", email: "person@example.com" }, request))
+      .rejects.toThrow("Personal account data could not be removed.");
+
+    expect(mocks.rollback).toHaveBeenCalledOnce();
+    expect(mocks.commit).not.toHaveBeenCalled();
   });
 });

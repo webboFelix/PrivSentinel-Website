@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { AdminAccessDenied } from "@/components/admin-access-denied";
 import { SuperAdminBootstrap } from "@/components/super-admin-bootstrap";
+import { ensureDatabaseSchema, getLibsqlClient } from "@/db";
 import { getPrincipal } from "@/lib/authorization";
 import { getServerEnv } from "@/lib/env";
 
@@ -29,5 +30,23 @@ async function BootstrapContent() {
     return <AdminAccessDenied description="This setup page is restricted to the designated initial administrator account." />;
   }
 
-  return <SuperAdminBootstrap email={principal.actor.email} emailVerified={principal.actor.emailVerified} />;
+  await ensureDatabaseSchema();
+  const [bootstrap, superAdministrator] = await Promise.all([
+    getLibsqlClient().execute({
+      sql: `SELECT "completedAt" FROM "admin_bootstrap" WHERE "id" = 'initial-super-admin'`,
+    }),
+    getLibsqlClient().execute({
+      sql: `SELECT "id" FROM "user" WHERE "role" = 'super_admin' LIMIT 1`,
+    }),
+  ]);
+  const isInitialized = bootstrap.rows[0]?.completedAt != null || superAdministrator.rows.length > 0;
+
+  return (
+    <SuperAdminBootstrap
+      email={principal.actor.email}
+      emailVerified={principal.actor.emailVerified}
+      isInitialized={isInitialized}
+      isSuperAdministrator={principal.actor.role === "super_admin"}
+    />
+  );
 }
