@@ -661,7 +661,7 @@ button { font: inherit; }
 .admin-publish-toggle input,.review-consent input { accent-color: #04c9e8; }
 .admin-secondary-button { display: inline-flex; justify-content: center; align-items: center; text-decoration: none; }
 .admin-busy { margin: 10px 0; }
-.admin-modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; overflow-y: auto; padding: 18px; background: rgba(0, 7, 20, .8); }
+.admin-modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow-y: auto; padding: 18px; background: rgba(0, 7, 20, .8); }
 .admin-modal { position: relative; width: min(100%, 620px); max-height: min(90vh, 850px); overflow-y: auto; padding: 22px; border: 1px solid rgba(69, 137, 215, .35); border-radius: 12px; background: #06172e; box-shadow: 0 20px 70px rgba(0, 0, 0, .45); }
 .admin-modal-close { position: absolute; right: 12px; top: 10px; width: 30px; height: 30px; border: 1px solid rgba(112, 156, 217, .2); border-radius: 7px; color: #c6d9f1; background: #0a2141; font-size: 20px; cursor: pointer; }
 .admin-modal h2 { margin: 0 36px 5px 0; font-size: 17px; }.admin-modal > p,.admin-modal h3 { color: #9bb4d3; font-size: 10px; }
