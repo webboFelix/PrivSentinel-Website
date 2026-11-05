@@ -70,6 +70,8 @@ export function RegisterPage({ authAvailable, googleConfigured }: { authAvailabl
   const router = useRouter();
   const [values, setValues] = useState({ fullName: "", email: "", phoneNumber: "", gender: "", password: "", confirmPassword: "" });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [emailVerificationPending, setEmailVerificationPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -137,12 +139,14 @@ export function RegisterPage({ authAvailable, googleConfigured }: { authAvailabl
     }
 
     setBusy(true);
+    setNotice("");
     let result: Awaited<ReturnType<typeof authClient.signUp.email>>;
     try {
       result = await authClient.signUp.email({
         name: parsed.data.fullName,
         email: parsed.data.email,
         password: parsed.data.password,
+        callbackURL: `/account?completeProfile=1${safeNextPath() === "/dashboard" ? "" : `&next=${encodeURIComponent(safeNextPath())}`}`,
       });
     } catch {
       setError("Could not reach the account service. Check your connection and try again.");
@@ -151,6 +155,13 @@ export function RegisterPage({ authAvailable, googleConfigured }: { authAvailabl
     }
     if (result.error) {
       setError(registrationError(result.error));
+      setBusy(false);
+      return;
+    }
+
+    if (!result.data?.token) {
+      setEmailVerificationPending(true);
+      setNotice("If this address can be registered, a verification link has been sent. Verify your email, then sign in to complete your profile. Existing accounts can request a link by signing in.");
       setBusy(false);
       return;
     }
@@ -188,7 +199,8 @@ export function RegisterPage({ authAvailable, googleConfigured }: { authAvailabl
         <label>Password<span className="password-input"><input type={showPassword ? "text" : "password"} autoComplete="new-password" minLength={12} maxLength={128} value={values.password} onChange={update("password")} placeholder="At least 12 characters" aria-invalid={Boolean(fieldErrors.password)} aria-describedby="password-requirements" /><button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((show) => !show)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span><small id="password-requirements">Use 12–128 characters with uppercase and lowercase letters, a number, and a symbol.</small>{fieldErrors.password && <small>{fieldErrors.password}</small>}</label>
         <label>Confirm password<input type="password" autoComplete="new-password" value={values.confirmPassword} onChange={update("confirmPassword")} placeholder="Enter your password again" aria-invalid={Boolean(fieldErrors.confirmPassword)} />{fieldErrors.confirmPassword && <small>{fieldErrors.confirmPassword}</small>}</label>
         {error && <p className="auth-message error" role="alert">{error}</p>}
-        <button className="auth-submit" type="submit" disabled={!authAvailable || busy}>{busy ? "Creating account…" : "Create account"} <ArrowRight size={16} /></button>
+        {notice && <p className="auth-message success" role="status">{notice}</p>}
+        <button className="auth-submit" type="submit" disabled={!authAvailable || busy || emailVerificationPending}>{busy ? "Creating account…" : emailVerificationPending ? "Check your email" : "Create account"} <ArrowRight size={16} /></button>
       </form>
       <div className="auth-or"><span />OR<span /></div>
       <button className="auth-google" type="button" disabled={!authAvailable || busy} onClick={() => void continueWithGoogle()}><b>G</b> {busy ? "Connecting to Google…" : "Continue with Google"}</button>
@@ -215,9 +227,11 @@ export function LoginPage({ authAvailable, googleConfigured }: { authAvailable: 
     try {
       const result = await authClient.signIn.email({ email: email.trim(), password });
       if (result.error) {
-        setError(result.error.status === 503
-          ? "Sign-in is temporarily unavailable. Please contact the site administrator."
-          : "Email or password is incorrect. Try again or reset your password.");
+        setError(result.error.code === "EMAIL_NOT_VERIFIED"
+          ? "Verify your email before signing in. If the address and password are correct, a new verification link has been sent."
+          : result.error.status === 503
+            ? "Sign-in is temporarily unavailable. Please contact the site administrator."
+            : "Email or password is incorrect. Try again or reset your password.");
         setBusy(false);
         return;
       }

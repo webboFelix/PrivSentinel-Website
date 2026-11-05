@@ -6,8 +6,6 @@ const validReview = {
   title: "A useful security tool",
   message: "PrivSentinel has made our endpoint review process clearer.",
   designation: "Security Analyst",
-  publicConsent: true,
-  displayNameConsent: false,
 };
 
 describe("testimonial submission validation", () => {
@@ -23,13 +21,9 @@ describe("testimonial submission validation", () => {
     expect(testimonialSchema.safeParse({ ...validReview, rating: 4.5 }).success).toBe(false);
   });
 
-  it("requires public consent before allowing display-name consent", () => {
-    const result = testimonialSchema.safeParse({
-      ...validReview,
-      publicConsent: false,
-      displayNameConsent: true,
-    });
-    expect(result.success).toBe(false);
+  it("does not require or accept consent fields", () => {
+    expect(testimonialSchema.safeParse(validReview).success).toBe(true);
+    expect(testimonialSchema.safeParse({ ...validReview, publicConsent: true }).success).toBe(false);
   });
 
   it("rejects client-supplied identity, role, and moderation state", () => {

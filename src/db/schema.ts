@@ -60,20 +60,13 @@ export const verification = sqliteTable("verification", {
   updatedAt: updatedAt(),
 }, (table) => [index("verification_identifier_idx").on(table.identifier)]);
 
-export const profiles = sqliteTable("profiles", {
-  id: text("id").primaryKey(),
-  userId: text("userId").notNull().unique().references(() => user.id, { onDelete: "cascade" }),
-  fullName: text("fullName").notNull(),
-  phoneNumber: text("phoneNumber"),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
-
 export const profileDetails = sqliteTable("profile_details", {
   userId: text("userId").primaryKey().references(() => user.id, { onDelete: "cascade" }),
+  phoneNumber: text("phoneNumber"),
   gender: text("gender"),
   organization: text("organization"),
   currentPosition: text("currentPosition"),
+  location: text("location"),
   avatar: text("avatar"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -186,7 +179,6 @@ export const schema = {
   session,
   account,
   verification,
-  profiles,
   profileDetails,
   billingCustomers,
   paymentMethods,

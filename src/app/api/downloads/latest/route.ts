@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { getDb } from "@/db";
-import { profileDetails, profiles } from "@/db/schema";
+import { profileDetails } from "@/db/schema";
 import { getPrincipal } from "@/lib/authorization";
 import { getGitHubConfig } from "@/lib/env";
 import { canDownload } from "@/lib/permissions";
@@ -27,15 +27,14 @@ export async function GET(request: Request) {
     return Response.json({ error: "Download limit reached. Try again later." }, { status: 429, headers: jsonHeaders });
   }
 
-  const [profile, profileDetailsRow] = await Promise.all([
-    getDb().query.profiles.findFirst({
-      where: eq(profiles.userId, principal.actor.id),
-    }),
-    getDb().query.profileDetails.findFirst({
-      where: eq(profileDetails.userId, principal.actor.id),
-    }),
-  ]);
-  if (!canDownload(profile ? { ...profile, gender: profileDetailsRow?.gender } : null)) {
+  const profileDetailsRow = await getDb().query.profileDetails.findFirst({
+    where: eq(profileDetails.userId, principal.actor.id),
+  });
+  if (!canDownload(profileDetailsRow ? {
+    fullName: principal.actor.name,
+    phoneNumber: profileDetailsRow.phoneNumber,
+    gender: profileDetailsRow.gender,
+  } : null)) {
     return Response.json({ error: "Complete your account profile before downloading.", profileUrl: "/account?completeProfile=1" }, { status: 403, headers: jsonHeaders });
   }
 

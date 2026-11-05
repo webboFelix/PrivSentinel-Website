@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
-import { testimonials, user } from "@/db/schema";
+import { profileDetails, testimonials, user } from "@/db/schema";
 import { isResponse, requireAdminApi } from "@/lib/admin-api";
 
 const statuses = new Set(["pending", "approved", "rejected"]);
@@ -19,11 +19,11 @@ export async function GET(request: Request) {
   const rows = await getDb().select({
     id: testimonials.id,
     userId: testimonials.userId,
-    name: testimonials.name,
+    name: user.name,
+    fallbackName: testimonials.name,
+    avatar: profileDetails.avatar,
     email: user.email,
     designation: testimonials.designation,
-    publicConsent: testimonials.publicConsent,
-    displayNameConsent: testimonials.displayNameConsent,
     title: testimonials.title,
     message: testimonials.quote,
     rating: testimonials.rating,
@@ -32,9 +32,15 @@ export async function GET(request: Request) {
     reviewedAt: testimonials.reviewedAt,
   }).from(testimonials)
     .leftJoin(user, eq(testimonials.userId, user.id))
+    .leftJoin(profileDetails, eq(testimonials.userId, profileDetails.userId))
     .where(eq(testimonials.status, status))
     .orderBy(desc(testimonials.createdAt))
     .limit(100);
 
-  return Response.json({ testimonials: rows }, { headers: { "Cache-Control": "no-store" } });
+  return Response.json({
+    testimonials: rows.map(({ fallbackName, ...review }) => ({
+      ...review,
+      name: review.name || fallbackName || "PrivSentinel user",
+    })),
+  }, { headers: { "Cache-Control": "no-store" } });
 }

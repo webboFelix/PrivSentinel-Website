@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { Suspense } from "react";
-import { useEffect, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -18,6 +17,8 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { DemoPlayer, ReleaseSummary, TestimonialPreview } from "@/components/product-widgets";
+import { useHydrated } from "@/hooks/use-hydrated";
+import { useReleasesQuery } from "@/hooks/use-releases";
 
 const features = [
   { icon: Shield, title: "Endpoint Monitoring", copy: "Real-time protection for your device" },
@@ -28,18 +29,10 @@ const features = [
   { icon: Radio, title: "Windows Event Signals", copy: "Review security-relevant system events" },
 ];
 
-type ReleaseResponse = { latest: { tagName: string } | null };
-
 function LatestVersion() {
-  const [version, setVersion] = useState("");
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/releases", { signal: controller.signal })
-      .then((response) => response.json() as Promise<ReleaseResponse>)
-      .then((result) => setVersion(result.latest?.tagName ?? ""))
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, []);
+  const hydrated = useHydrated();
+  const { data } = useReleasesQuery();
+  const version = hydrated ? data?.latest?.tagName ?? "" : "";
   return <span className="version-pill"><ShieldCheck size={12} /> Latest Version{version ? `: ${version}` : ""}</span>;
 }
 

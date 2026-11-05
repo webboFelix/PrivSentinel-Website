@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gt, inArray, isNull, like, lte, max, or } from "drizzle-orm";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
-import { auditLogs, profiles, session, user } from "@/db/schema";
+import { auditLogs, session, user } from "@/db/schema";
 import { isResponse, requireAdminApi } from "@/lib/admin-api";
 
 const roles = new Set(["user", "admin", "super_admin"]);
@@ -48,14 +48,12 @@ export async function GET(request: Request) {
     db.select({
       id: user.id,
       name: user.name,
-      profileName: profiles.fullName,
       email: user.email,
       role: user.role,
       createdAt: user.createdAt,
       banned: user.banned,
       banExpires: user.banExpires,
     }).from(user)
-      .leftJoin(profiles, eq(user.id, profiles.userId))
       .where(where)
       .orderBy(desc(user.createdAt))
       .limit(limit)
@@ -92,7 +90,7 @@ export async function GET(request: Request) {
     offset,
     users: rows.map((row) => ({
       ...row,
-      displayName: row.profileName || row.name,
+      displayName: row.name,
       status: row.banned && (!row.banExpires || row.banExpires > now) ? "suspended" : "active",
       lastLoginAt: lastLoginByUser.get(row.id) ?? null,
     })),

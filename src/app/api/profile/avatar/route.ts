@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
 import { auditLogs, profileDetails } from "@/db/schema";
 import { getPrincipal } from "@/lib/authorization";
+import { deleteProfileAvatar, uploadProfileAvatar } from "@/lib/cloudinary";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
 
 
 const avatarPattern = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
-const maxImageBytes = 5 * 1024 * 1024;
+const maxImageBytes = 1024 * 1024;
 const maxEncodedLength = Math.ceil(maxImageBytes / 3) * 4 + 30;
 const maxRequestBytes = maxEncodedLength + 1_000;
 
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
 
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (contentLength > maxRequestBytes) {
-    return Response.json({ error: "Avatar images must be 5 MB or smaller." }, { status: 413 });
+    return Response.json({ error: "Avatar images must be 1 MB or smaller." }, { status: 413 });
   }
 
   let body: unknown;
@@ -48,7 +50,7 @@ export async function POST(request: Request) {
       totalBytes += value.byteLength;
       if (totalBytes > maxRequestBytes) {
         await reader.cancel();
-        return Response.json({ error: "Avatar images must be 5 MB or smaller." }, { status: 413 });
+        return Response.json({ error: "Avatar images must be 1 MB or smaller." }, { status: 413 });
       }
       chunks.push(value);
     }
@@ -69,6 +71,17 @@ export async function POST(request: Request) {
   const image = body.image;
   if (image === null) {
     const db = getDb();
+    const current = await db.query.profileDetails.findFirst({
+      columns: { avatar: true },
+      where: eq(profileDetails.userId, principal.actor.id),
+    });
+    if (current?.avatar?.startsWith("https://res.cloudinary.com/")) {
+      try {
+        await deleteProfileAvatar(principal.actor.id);
+      } catch {
+        return Response.json({ error: "Profile image could not be removed from Cloudinary. Please try again." }, { status: 502 });
+      }
+    }
     await db.insert(profileDetails).values({
       userId: principal.actor.id,
       avatar: null,
@@ -85,7 +98,7 @@ export async function POST(request: Request) {
     return Response.json({ image: null });
   }
   if (typeof image !== "string" || image.length > maxEncodedLength) {
-    return Response.json({ error: "Avatar images must be 5 MB or smaller." }, { status: 413 });
+    return Response.json({ error: "Avatar images must be 1 MB or smaller." }, { status: 413 });
   }
   const match = avatarPattern.exec(image);
   if (!match) {
@@ -93,16 +106,26 @@ export async function POST(request: Request) {
   }
   const bytes = Buffer.from(match[2], "base64");
   if (bytes.length > maxImageBytes || !isSupportedImage(match[1], bytes)) {
-    return Response.json({ error: "The image is invalid or exceeds the 5 MB limit." }, { status: 400 });
+    return Response.json({ error: "The image is invalid or exceeds the 1 MB limit." }, { status: 400 });
+  }
+
+  let imageUrl: string;
+  try {
+    imageUrl = await uploadProfileAvatar(principal.actor.id, bytes, `image/${match[1]}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Cloudinary is not configured.")) {
+      return Response.json({ error: "Profile image storage is not configured. Please contact the site administrator." }, { status: 503 });
+    }
+    return Response.json({ error: "Profile image could not be uploaded. Please try again." }, { status: 502 });
   }
 
   const db = getDb();
   await db.insert(profileDetails).values({
     userId: principal.actor.id,
-    avatar: image,
+    avatar: imageUrl,
   }).onConflictDoUpdate({
     target: profileDetails.userId,
-    set: { avatar: image, updatedAt: new Date() },
+    set: { avatar: imageUrl, updatedAt: new Date() },
   });
   await db.insert(auditLogs).values({
     id: randomUUID(),
@@ -110,5 +133,5 @@ export async function POST(request: Request) {
     action: "profile.avatar.updated",
     resource: "profile.avatar",
   });
-  return Response.json({ image });
+  return Response.json({ image: imageUrl });
 }

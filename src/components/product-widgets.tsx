@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -16,32 +17,10 @@ import {
   Volume2,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-
-type ReleaseAsset = { name: string; size: number; downloadCount: number };
-export type Release = {
-  id: number;
-  tagName: string;
-  name: string;
-  body: string;
-  publishedAt: string | null;
-  url: string;
-  installer: ReleaseAsset | null;
-};
-type ReleasesResponse = { latest: Release | null; history: Release[]; error?: string };
-type Testimonial = {
-  id: string;
-  name: string;
-  designation: string | null;
-  title: string;
-  message: string;
-  rating: number;
-  submittedAt: string;
-};
-type TestimonialFailure = { code?: string; error?: string };
-type TestimonialResponse = {
-  reviews: Testimonial[];
-  summary: { count: number; average: number };
-};
+import { useHydrated } from "@/hooks/use-hydrated";
+import { useProfileQuery } from "@/hooks/use-profile";
+import { useReleaseQuery, useReleasesQuery } from "@/hooks/use-releases";
+import { usePublicTestimonialsQuery } from "@/hooks/use-testimonials";
 
 function bytes(value: number) {
   return value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
@@ -49,7 +28,7 @@ function bytes(value: number) {
 
 function releaseDate(value: string | null) {
   if (!value) return "Date not provided";
-  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }
 
 function LoadingLine({ className = "" }: { className?: string }) {
@@ -70,20 +49,6 @@ function ReleaseLoadingSkeleton({ compact }: { compact: boolean }) {
 function releaseErrorMessage(error: unknown, apiMessage?: string) {
   if (error instanceof TypeError) return "Could not connect to the release service. Check your connection and try again.";
   return apiMessage || "Release information could not be loaded. Please try again.";
-}
-
-function isTestimonial(value: unknown): value is Testimonial {
-  if (typeof value !== "object" || value === null) return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.id === "string" &&
-    typeof record.name === "string" &&
-    (typeof record.designation === "string" || record.designation === null) &&
-    typeof record.title === "string" &&
-    typeof record.message === "string" &&
-    typeof record.rating === "number" &&
-    Number.isInteger(record.rating) &&
-    record.rating >= 1 && record.rating <= 5 &&
-    typeof record.submittedAt === "string";
 }
 
 export function DemoPlayer({ videoUrl, compact = false }: { videoUrl: string; compact?: boolean }) {
@@ -133,54 +98,21 @@ export function DemoPlayer({ videoUrl, compact = false }: { videoUrl: string; co
 }
 
 export function ReleaseSummary({ compact = false, authAvailable = false }: { compact?: boolean; authAvailable?: boolean }) {
+  const hydrated = useHydrated();
   const searchParams = useSearchParams();
-  const [data, setData] = useState<ReleasesResponse | null>(null);
-  const [selectedRelease, setSelectedRelease] = useState<Release | null>(null);
-  const [selectedError, setSelectedError] = useState("");
-  const [refresh, setRefresh] = useState(0);
   const selectedVersion = compact ? null : searchParams.get("version");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/releases", { signal: controller.signal })
-      .then(async (response) => {
-        const result = await response.json() as ReleasesResponse;
-        if (!response.ok) {
-          setData({ latest: null, history: [], error: releaseErrorMessage(null, result.error) });
-          return;
-        }
-        setData(result);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setData({ latest: null, history: [], error: releaseErrorMessage(error) });
-      });
-    return () => controller.abort();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!selectedVersion) return;
-    const controller = new AbortController();
-    fetch(`/api/releases/${encodeURIComponent(selectedVersion)}`, { signal: controller.signal })
-      .then(async (response) => {
-        const result = await response.json() as { release?: Release; error?: string };
-        if (!response.ok || !result.release) {
-          setSelectedError(result.error || "This release could not be found. Choose another version from the release history.");
-          return;
-        }
-        setSelectedRelease(result.release);
-        setSelectedError("");
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setSelectedError(releaseErrorMessage(error, "This release could not be loaded. Please try again."));
-      });
-    return () => controller.abort();
-  }, [selectedVersion, refresh]);
-
+  const releasesQuery = useReleasesQuery();
+  const selectedReleaseQuery = useReleaseQuery(selectedVersion);
+  const data = releasesQuery.data;
+  const selectedRelease = selectedReleaseQuery.data?.release;
+  const selectedError = selectedReleaseQuery.error
+    ? releaseErrorMessage(selectedReleaseQuery.error, selectedReleaseQuery.error.message)
+    : selectedVersion && selectedReleaseQuery.data && !selectedRelease
+      ? selectedReleaseQuery.data.error || "This release could not be found. Choose another version from the release history."
+      : "";
   const release = selectedVersion ? selectedRelease : data?.latest;
-  const loadingSelectedRelease = Boolean(selectedVersion && !selectedRelease && !selectedError);
-  const loadingLatestRelease = !selectedVersion && data === null;
+  const loadingSelectedRelease = !hydrated || Boolean(selectedVersion && selectedReleaseQuery.isPending);
+  const loadingLatestRelease = !hydrated || (!selectedVersion && releasesQuery.isPending);
   return (
     <section className={`release-summary${compact ? " is-compact" : ""}`} aria-labelledby={compact ? "home-release-title" : "download-release-title"} aria-busy={loadingSelectedRelease || loadingLatestRelease}>
       {!compact && <span className="route-eyebrow">WINDOWS RELEASES</span>}
@@ -189,9 +121,11 @@ export function ReleaseSummary({ compact = false, authAvailable = false }: { com
       {loadingSelectedRelease || loadingLatestRelease ? (
         <ReleaseLoadingSkeleton compact={compact} />
       ) : selectedError ? (
-        <div className="release-error-state" role="alert"><p className="release-feedback is-error">{selectedError}</p><button type="button" className="state-retry-button" onClick={() => { setSelectedError(""); setSelectedRelease(null); setRefresh((value) => value + 1); }}>Try again</button></div>
+        <div className="release-error-state" role="alert"><p className="release-feedback is-error">{selectedError}</p><button type="button" className="state-retry-button" onClick={() => void selectedReleaseQuery.refetch()}>Try again</button></div>
+      ) : releasesQuery.error ? (
+        <div className="release-error-state" role="alert"><p className="release-feedback is-error">{releaseErrorMessage(releasesQuery.error, releasesQuery.error.message)}</p><button type="button" className="state-retry-button" onClick={() => void releasesQuery.refetch()}>Try again</button></div>
       ) : data?.error ? (
-        <div className="release-error-state" role="alert"><p className="release-feedback is-error">{data.error}</p><button type="button" className="state-retry-button" onClick={() => { setData(null); setRefresh((value) => value + 1); }}>Try again</button></div>
+        <div className="release-error-state" role="alert"><p className="release-feedback is-error">{data.error}</p><button type="button" className="state-retry-button" onClick={() => void releasesQuery.refetch()}>Try again</button></div>
       ) : !release ? (
         <p className="release-feedback release-empty-state" role="status">No stable release is published yet. Please check back later.</p>
       ) : (
@@ -235,24 +169,7 @@ function InstallerAccessLink({ authAvailable, tagName, size }: { authAvailable: 
 
 function ConfiguredInstallerAccessLink({ tagName, size }: { tagName: string; size: number }) {
   const { data: session, isPending } = authClient.useSession();
-  const [profileState, setProfileState] = useState<{ userId: string; status: "complete" | "incomplete" | "error" } | null>(null);
-
-  useEffect(() => {
-    if (isPending || !session?.user) return;
-
-    const controller = new AbortController();
-    fetch("/api/profile", { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Profile could not be checked.");
-        const result = await response.json() as { profile: { phoneNumber: string | null; gender: string | null } | null };
-        setProfileState({ userId: session.user.id, status: result.profile?.phoneNumber && result.profile.gender ? "complete" : "incomplete" });
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setProfileState({ userId: session.user.id, status: "error" });
-      });
-    return () => controller.abort();
-  }, [isPending, session]);
+  const profileQuery = useProfileQuery(session?.user.id);
 
   if (isPending) {
     return <button className="release-download" type="button" disabled><Download size={17} /> Checking download access…</button>;
@@ -260,67 +177,37 @@ function ConfiguredInstallerAccessLink({ tagName, size }: { tagName: string; siz
   if (!session?.user) {
     return <Link className="release-download" href="/register?next=%2Fapi%2Fdownloads%2Flatest"><Download size={17} /> Download Windows Installer ({tagName}) <span>— {bytes(size)}</span></Link>;
   }
-  const profileStatus = profileState?.userId === session.user.id ? profileState.status : "checking";
-  if (profileStatus === "checking") {
+  if (profileQuery.isPending) {
     return <button className="release-download" type="button" disabled><Download size={17} /> Checking download access…</button>;
   }
-  if (profileStatus === "complete") {
+  if (profileQuery.data?.profile?.phoneNumber && profileQuery.data.profile.gender) {
     return <a className="release-download" href="/api/downloads/latest"><Download size={17} /> Download Windows Installer ({tagName}) <span>— {bytes(size)}</span></a>;
   }
-  const label = profileStatus === "error" ? "Review account profile to download" : "Complete profile to download";
+  const label = profileQuery.error ? "Review account profile to download" : "Complete profile to download";
   return <Link className="release-download" href="/account?completeProfile=1&next=%2Fapi%2Fdownloads%2Flatest"><Download size={17} /> {label} <span>— {bytes(size)}</span></Link>;
 }
 
 export function TestimonialPreview() {
-  const [reviews, setReviews] = useState<Testimonial[] | null>(null);
-  const [summary, setSummary] = useState<TestimonialResponse["summary"] | null>(null);
-  const [failure, setFailure] = useState("");
-  const [refresh, setRefresh] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/testimonials", { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          const result = await response.json() as TestimonialFailure;
-          setFailure(result.error || "Approved testimonials could not be loaded.");
-          return;
-        }
-        const result = await response.json() as unknown;
-        if (typeof result !== "object" || result === null || !("reviews" in result) ||
-            !Array.isArray(result.reviews) || !result.reviews.every(isTestimonial) ||
-            !("summary" in result) || typeof result.summary !== "object" || result.summary === null ||
-            !("count" in result.summary) || !Number.isInteger(result.summary.count) ||
-            !("average" in result.summary) || typeof result.summary.average !== "number") {
-          setFailure("The testimonial response was invalid. Please try again.");
-          return;
-        }
-        setReviews(result.reviews);
-        setSummary(result.summary as TestimonialResponse["summary"]);
-        setFailure("");
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setFailure(error instanceof TypeError
-          ? "Could not connect to load testimonials. Check your connection and try again."
-          : "Approved testimonials could not be loaded. Please try again.");
-      });
-    return () => controller.abort();
-  }, [refresh]);
+  const hydrated = useHydrated();
+  const testimonialsQuery = usePublicTestimonialsQuery();
+  const reviews = testimonialsQuery.data?.reviews ?? [];
+  const summary = testimonialsQuery.data?.summary;
 
   return (
     <section className="testimonial-preview" aria-labelledby="testimonial-title">
       <h2 id="testimonial-title">What Our Users Say</h2>
       <p>Feedback from the PrivSentinel community.</p>
-      {failure ? <div className="testimonial-empty-state" role="alert"><p className="testimonial-empty">{failure}</p><button type="button" className="state-retry-button" onClick={() => { setFailure(""); setReviews(null); setRefresh((value) => value + 1); }}>Try again</button></div> :
-        reviews === null ? <TestimonialLoadingSkeleton /> :
+      {!hydrated || testimonialsQuery.isPending ? <TestimonialLoadingSkeleton /> :
+        testimonialsQuery.error ? <div className="testimonial-empty-state" role="alert"><p className="testimonial-empty">{testimonialsQuery.error.message || "Approved testimonials could not be loaded."}</p><button type="button" className="state-retry-button" onClick={() => void testimonialsQuery.refetch()}>Try again</button></div> :
           reviews.length === 0 ? <p className="testimonial-empty" role="status">No approved reviews yet. Check back later.</p> :
             <><p className="testimonial-rating-summary" aria-label={`${summary?.average.toFixed(1) ?? "0.0"} average from ${summary?.count ?? 0} approved reviews`}>
               <span aria-hidden="true">{"★".repeat(Math.round(summary?.average ?? 0))}</span>
               {summary?.average.toFixed(1)} average · {summary?.count} approved {summary?.count === 1 ? "review" : "reviews"}
             </p><div className="testimonial-stack">{reviews.slice(0, 3).map((review) => (
               <article className="testimonial-card" key={review.id}>
-                <span className="testimonial-avatar" aria-hidden="true">{review.name.slice(0, 1).toUpperCase()}</span>
+                <span className="testimonial-avatar" aria-hidden="true">{review.avatar
+                  ? <Image src={review.avatar} alt="" width={42} height={42} unoptimized />
+                  : review.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
                 <div><div className="testimonial-stars" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}</div><h3>{review.title}</h3><blockquote>“{review.message}”</blockquote><strong>— {review.name}{review.designation ? `, ${review.designation}` : ""}</strong><time dateTime={review.submittedAt}>{releaseDate(review.submittedAt)}</time></div>
               </article>
             ))}</div></>}

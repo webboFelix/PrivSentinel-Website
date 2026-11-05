@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { connection } from "next/server";
-import { ensureDatabaseSchema, getDb } from "@/db";
-import { auditLogs, profileDetails, profiles, user } from "@/db/schema";
+import { ensureDatabaseSchema, getDb, getLibsqlClient } from "@/db";
+import { profileDetails } from "@/db/schema";
 import { getPrincipal } from "@/lib/authorization";
 import { profileSchema } from "@/lib/validation";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
@@ -13,20 +13,18 @@ export async function GET(request: Request) {
   const principal = await getPrincipal(request.headers);
   if (!principal) return Response.json({ error: "Sign in to view your account." }, { status: 401 });
 
-  const [profile, details] = await Promise.all([
-    getDb().query.profiles.findFirst({
-    where: eq(profiles.userId, principal.actor.id),
-    }),
-    getDb().query.profileDetails.findFirst({
-      where: eq(profileDetails.userId, principal.actor.id),
-    }),
-  ]);
+  const details = await getDb().query.profileDetails.findFirst({
+    where: eq(profileDetails.userId, principal.actor.id),
+  });
   return Response.json({
-    profile: profile ? {
-      ...profile,
-      gender: details?.gender ?? null,
-      organization: details?.organization ?? null,
-      currentPosition: details?.currentPosition ?? null,
+    profile: details ? {
+      fullName: principal.actor.name,
+      phoneNumber: details.phoneNumber,
+      gender: details.gender,
+      organization: details.organization,
+      currentPosition: details.currentPosition,
+      location: details.location,
+      createdAt: details.createdAt,
     } : null,
     avatar: details?.avatar ?? null,
     role: principal.actor.role,
@@ -65,6 +63,9 @@ export async function POST(request: Request) {
   const existingDetails = await db.query.profileDetails.findFirst({
     where: eq(profileDetails.userId, principal.actor.id),
   });
+  const location = Object.hasOwn(parsed.data, "location")
+    ? parsed.data.location || null
+    : existingDetails?.location ?? null;
   if (existingDetails?.gender && existingDetails.gender !== parsed.data.gender) {
     return Response.json({
       error: "Your saved gender cannot be changed from Account settings.",
@@ -72,40 +73,40 @@ export async function POST(request: Request) {
     }, { status: 409 });
   }
 
-  await db.insert(profiles).values({
-    id: randomUUID(),
-    userId: principal.actor.id,
-    fullName: parsed.data.fullName,
-    phoneNumber: parsed.data.phoneNumber,
-  }).onConflictDoUpdate({
-    target: profiles.userId,
-    set: {
-      fullName: parsed.data.fullName,
-      phoneNumber: parsed.data.phoneNumber,
-      updatedAt: new Date(),
+  const now = Date.now();
+  await getLibsqlClient().batch([
+    {
+      sql: `INSERT INTO "profile_details"
+        ("userId", "phoneNumber", "gender", "organization", "currentPosition", "location", "createdAt", "updatedAt")
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT("userId") DO UPDATE SET
+          "phoneNumber" = excluded."phoneNumber",
+          "gender" = excluded."gender",
+          "organization" = excluded."organization",
+          "currentPosition" = excluded."currentPosition",
+          "location" = excluded."location",
+          "updatedAt" = excluded."updatedAt"`,
+      args: [
+        principal.actor.id,
+        parsed.data.phoneNumber,
+        parsed.data.gender,
+        parsed.data.organization,
+        parsed.data.currentPosition,
+        location,
+        now,
+        now,
+      ],
     },
-  });
-  await db.insert(profileDetails).values({
-    userId: principal.actor.id,
-    gender: parsed.data.gender,
-    organization: parsed.data.organization,
-    currentPosition: parsed.data.currentPosition,
-  }).onConflictDoUpdate({
-    target: profileDetails.userId,
-    set: {
-      gender: parsed.data.gender,
-      organization: parsed.data.organization,
-      currentPosition: parsed.data.currentPosition,
-      updatedAt: new Date(),
+    {
+      sql: `UPDATE "user" SET "name" = ?, "updatedAt" = ? WHERE "id" = ?`,
+      args: [parsed.data.fullName, now, principal.actor.id],
     },
-  });
-  await db.update(user).set({ name: parsed.data.fullName, updatedAt: new Date() }).where(eq(user.id, principal.actor.id));
-  await db.insert(auditLogs).values({
-    id: randomUUID(),
-    userId: principal.actor.id,
-    action: "profile.updated",
-    resource: "profile",
-  });
+    {
+      sql: `INSERT INTO "audit_logs" ("id", "userId", "action", "resource", "timestamp")
+        VALUES (?, ?, 'profile.updated', 'profile', ?)`,
+      args: [randomUUID(), principal.actor.id, now],
+    },
+  ], "write");
 
   return Response.json({ success: true });
 }

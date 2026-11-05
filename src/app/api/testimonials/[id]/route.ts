@@ -39,8 +39,6 @@ export async function PATCH(request: Request, context: RouteContext<"/api/testim
     title: parsed.data.title,
     designation: parsed.data.designation,
     rating: parsed.data.rating,
-    publicConsent: parsed.data.publicConsent,
-    displayNameConsent: parsed.data.publicConsent && parsed.data.displayNameConsent,
     status: "pending",
     approvedAt: null,
     reviewedBy: null,

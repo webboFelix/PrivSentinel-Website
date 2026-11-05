@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
-import { auditLogs, downloads, profiles, releases, user } from "@/db/schema";
+import { auditLogs, downloads, releases, user } from "@/db/schema";
 import { isResponse, requireAdminApi } from "@/lib/admin-api";
 
 export async function GET(request: Request) {
@@ -24,12 +24,11 @@ export async function GET(request: Request) {
       db.select({ role: user.role, value: count() }).from(user).groupBy(user.role),
       db.select({
         id: user.id,
-        name: profiles.fullName,
+        name: user.name,
         email: user.email,
         role: user.role,
         createdAt: user.createdAt,
       }).from(user)
-        .leftJoin(profiles, eq(user.id, profiles.userId))
         .orderBy(desc(user.createdAt))
         .limit(8),
       db.select({

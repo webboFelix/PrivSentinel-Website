@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { DottedLoader } from "@/components/dotted-loader";
 
 type Role = "user" | "admin" | "super_admin";
 type Status = "active" | "suspended";
@@ -15,6 +16,7 @@ type AdminUser = {
   createdAt: string;
   status: Status;
   lastLoginAt: string | null;
+  avatar?: string | null;
 };
 type Overview = {
   totals: { users: number; activeUsers: number; suspendedUsers: number; downloads: number };
@@ -27,8 +29,7 @@ type Review = {
   name: string;
   email: string | null;
   designation: string | null;
-  publicConsent: boolean;
-  displayNameConsent: boolean;
+  avatar: string | null;
   title: string;
   message: string;
   rating: number;
@@ -61,6 +62,7 @@ type UserDetail = {
     phoneNumber: string | null;
     organization: string | null;
     currentPosition: string | null;
+    location: string | null;
     downloadCount: number;
   };
   activity: Array<{ id: string; action: string; resource: string; timestamp: string; metadata: string | null }>;
@@ -228,7 +230,7 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
         </nav>
         {error && <p className="account-message error" role="alert">{error}</p>}
         {notice && <p className="account-message success" role="status">{notice}</p>}
-        {busy && <p className="admin-busy" role="status">Saving administrative change…</p>}
+        {busy && <p className="admin-busy"><DottedLoader label="Saving administrative change…" /></p>}
 
         {section === "Overview" && <OverviewPanel data={overview} />}
         {section === "Users" && <section className="admin-panel">
@@ -257,9 +259,9 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
             <label>Filter by status<select value={reviewStatus} onChange={(event) => setReviewStatus(event.target.value as Review["status"])}><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label></div>
           {reviews.length === 0 ? <p className="admin-empty">No {reviewStatus} testimonials.</p> : <div className="admin-review-list">{reviews.map((review) => <article className="admin-review" key={review.id}>
             <header><span className="testimonial-stars" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}</span><time>{formatDate(review.createdAt)}</time></header>
-            <h3>{review.title}</h3><p>{review.message}</p><small>{review.name}{review.email ? ` · ${review.email}` : ""}{review.designation ? ` · ${review.designation}` : ""}</small>
-            <div className="admin-review-consent">Public permission: {review.publicConsent ? "Yes" : "No"} · Show name: {review.displayNameConsent ? "Yes" : "No"}</div>
-            <div className="admin-actions">{review.status !== "approved" && review.publicConsent && <button type="button" disabled={busy} onClick={() => void moderate(review, "approved")}>Approve</button>}{review.status !== "rejected" && <button type="button" disabled={busy} onClick={() => void moderate(review, "rejected")}>{review.status === "approved" ? "Remove from public display" : "Reject"}</button>}</div>
+            <div className="admin-review-author">{review.avatar ? <Image src={review.avatar} alt="" width={34} height={34} unoptimized /> : <span aria-hidden="true">{review.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>}<small>{review.name}{review.email ? ` · ${review.email}` : ""}{review.designation ? ` · ${review.designation}` : ""}</small></div>
+            <h3>{review.title}</h3><p>{review.message}</p>
+            <div className="admin-actions">{review.status !== "approved" && <button type="button" disabled={busy} onClick={() => void moderate(review, "approved")}>Approve</button>}{review.status !== "rejected" && <button type="button" disabled={busy} onClick={() => void moderate(review, "rejected")}>{review.status === "approved" ? "Remove from public display" : "Reject"}</button>}</div>
           </article>)}</div>}
         </section>}
 
@@ -287,7 +289,7 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
         <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-user-detail-title">
           <button type="button" className="admin-modal-close" onClick={() => setDetail(null)} aria-label="Close user details">×</button>
           <h2 id="admin-user-detail-title">{detail.user.displayName}</h2><p>{detail.user.email}</p>
-          <dl><dt>Role</dt><dd>{detail.user.role}</dd><dt>Status</dt><dd>{detail.user.status}{detail.user.banReason ? ` · ${detail.user.banReason}` : ""}</dd><dt>Registered</dt><dd>{formatDate(detail.user.createdAt)}</dd><dt>Last login</dt><dd>{formatDate(detail.user.lastLoginAt)}</dd><dt>Downloads</dt><dd>{detail.user.downloadCount}</dd><dt>Email verified</dt><dd>{detail.user.emailVerified ? "Yes" : "No"}</dd><dt>Organization</dt><dd>{detail.user.organization || "Not provided"}</dd><dt>Position</dt><dd>{detail.user.currentPosition || "Not provided"}</dd></dl>
+          <dl><dt>Role</dt><dd>{detail.user.role}</dd><dt>Status</dt><dd>{detail.user.status}{detail.user.banReason ? ` · ${detail.user.banReason}` : ""}</dd><dt>Registered</dt><dd>{formatDate(detail.user.createdAt)}</dd><dt>Last login</dt><dd>{formatDate(detail.user.lastLoginAt)}</dd><dt>Downloads</dt><dd>{detail.user.downloadCount}</dd><dt>Email verified</dt><dd>{detail.user.emailVerified ? "Yes" : "No"}</dd><dt>Organization</dt><dd>{detail.user.organization || "Not provided"}</dd><dt>Position</dt><dd>{detail.user.currentPosition || "Not provided"}</dd><dt>Location</dt><dd>{detail.user.location || "Not provided"}</dd></dl>
           <h3>Recent account activity</h3>{detail.activity.length ? <ul className="admin-events">{detail.activity.map((event) => <li key={event.id}><span><strong>{event.action}</strong><small>{event.resource}</small></span><time>{formatDate(event.timestamp)}</time></li>)}</ul> : <p>No activity recorded.</p>}
         </section>
       </div>}
@@ -296,7 +298,7 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
 }
 
 function OverviewPanel({ data }: { data: Overview | null }) {
-  if (!data) return <p className="admin-empty" role="status">Loading overview…</p>;
+  if (!data) return <p className="admin-empty"><DottedLoader label="Loading overview…" /></p>;
   return <>
     <div className="admin-stats"><article><span>Registered users</span><strong>{data.totals.users}</strong></article><article><span>Active users</span><strong>{data.totals.activeUsers}</strong></article><article><span>Total downloads</span><strong>{data.totals.downloads}</strong></article><article><span>Suspended accounts</span><strong>{data.totals.suspendedUsers}</strong></article></div>
     <section className="admin-panel"><h2>User role distribution</h2><div className="admin-role-distribution">{(["user", "admin", "super_admin"] as const).map((value) => <div key={value}><span>{value.replace("_", " ")}</span><strong>{data.roleDistribution[value] ?? 0}</strong></div>)}</div></section>

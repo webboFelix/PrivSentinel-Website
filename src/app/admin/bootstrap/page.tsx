@@ -1,9 +1,17 @@
 import { headers } from "next/headers";
 import { connection } from "next/server";
-import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { AdminAccessDenied } from "@/components/admin-access-denied";
 import { SuperAdminBootstrap } from "@/components/super-admin-bootstrap";
 import { getPrincipal } from "@/lib/authorization";
+import { getServerEnv } from "@/lib/env";
+
+export const metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export default function BootstrapPage() {
   return <Suspense fallback={<main className="auth-page"><div className="account-loading"><span className="loading-dot" /> Loading secure setup…</div></main>}><BootstrapContent /></Suspense>;
@@ -12,7 +20,14 @@ export default function BootstrapPage() {
 async function BootstrapContent() {
   await connection();
   const principal = await getPrincipal(await headers());
-  if (!principal) redirect("/login?next=%2Fadmin%2Fbootstrap");
-  if (principal.actor.role === "admin" || principal.actor.role === "super_admin") redirect("/admin");
-  return <SuperAdminBootstrap />;
+  if (!principal) {
+    return <AdminAccessDenied description="Sign in with the designated initial administrator account to access this page." />;
+  }
+
+  const designatedEmail = getServerEnv().INITIAL_SUPER_ADMIN_EMAIL;
+  if (!designatedEmail || principal.actor.email.toLowerCase() !== designatedEmail) {
+    return <AdminAccessDenied description="This setup page is restricted to the designated initial administrator account." />;
+  }
+
+  return <SuperAdminBootstrap email={principal.actor.email} emailVerified={principal.actor.emailVerified} />;
 }

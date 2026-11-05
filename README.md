@@ -18,9 +18,9 @@ The desktop application itself is not part of this repository. The landing page 
 ## Prerequisites
 
 - Node.js 22 or newer and npm
-- A Turso database and auth token for accounts, profiles, release cache, downloads, and audit events
+- A Turso database and auth token for accounts, profile details, release cache, downloads, and audit events
 - Google OAuth credentials to enable Google sign-in
-- An email provider (Resend) to deliver password-reset links
+- A Gmail account with 2-Step Verification and an app password to deliver password-reset and email-verification links
 - A Stripe account and server-side secret key to enable card verification
 - The configured public GitHub releases repository
 
@@ -41,14 +41,15 @@ The root `.env` is ignored by Git. Put actual credentials only in `.env` (or you
 | `TURSO_AUTH_TOKEN` | Private Turso access token |
 | `BETTER_AUTH_SECRET` | Random secret of at least 32 characters |
 | `BETTER_AUTH_URL` | Canonical origin used for auth callbacks, e.g. `http://localhost:3000` |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | Optional server-only settings for storing profile photos in Cloudinary; set all three as Vercel environment variables to enable avatar uploads |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials; set both or leave both blank |
-| `INITIAL_SUPER_ADMIN_EMAIL` | Email of the already registered account allowed to perform the one-time initial super-admin setup |
-| `SUPER_ADMIN_BOOTSTRAP_SECRET` | Server-only random secret (at least 32 characters) required for initial super-admin setup; set together with the email |
+| `INITIAL_SUPER_ADMIN_EMAIL` | Email of the account allowed to perform the one-time initial super-admin setup |
 | `GITHUB_OWNER` / `GITHUB_REPO` | Releases repository (defaults in `.env` use the repository supplied for this project) |
 | `GITHUB_TOKEN` | Optional server-only GitHub token to increase API rate limits; never expose it to the browser |
-| `NEXT_PUBLIC_APP_URL` | Public canonical app URL; never put secrets in this variable |
+| `NEXT_PUBLIC_APP_URL` | Public canonical app URL; never put secrets in this variable. For shared local/production env files, local and production URLs may be separated with ` || `; development uses the first and production uses the last. |
 | `NEXT_PUBLIC_DEMO_VIDEO_URL` | Optional HTTPS video URL or local `/videos/...` path |
-| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | Optional password-reset delivery; set both to enable email reset |
+| `GMAIL_SMTP_USER` | Gmail address used as the server-side SMTP sender |
+| `GMAIL_APP_PASSWORD` | Gmail app password for SMTP; server-side secret only, never use the regular Google password |
 | `STRIPE_SECRET_KEY` | Optional server-only Stripe key (`sk_test_...` for testing, `sk_live_...` for production); never expose it with a `NEXT_PUBLIC_` prefix |
 
 Generate a signing secret locally instead of reusing a password:
@@ -57,7 +58,7 @@ Generate a signing secret locally instead of reusing a password:
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
 ```
 
-Copy the output into `BETTER_AUTH_SECRET` in `.env`. Leave credentials blank until you have the real provider values. Authentication and protected downloads require `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and a `BETTER_AUTH_SECRET` of at least 32 characters. If any are missing or invalid, login and registration explain that authentication is unavailable, and `/api/auth/*` returns a sanitized `503` without initializing the database or exposing configuration values. The public landing and release API can still be viewed without credentials.
+Copy the output into `BETTER_AUTH_SECRET` in `.env`. For email, enable 2-Step Verification on the Gmail account, create a Google App Password, then set `GMAIL_SMTP_USER` and `GMAIL_APP_PASSWORD`. App passwords are only available for eligible Google accounts with 2-Step Verification; use a dedicated sender mailbox and never use its regular account password. Keep the app password in a server-side secret store. Leave credentials blank until you have the real provider values. Authentication and protected downloads require `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and a `BETTER_AUTH_SECRET` of at least 32 characters. If any are missing or invalid, login and registration explain that authentication is unavailable, and `/api/auth/*` returns a sanitized `503` without initializing the database or exposing configuration values. The public landing and release API can still be viewed without credentials.
 
 ## Turso and Drizzle
 
@@ -68,9 +69,35 @@ npm run db:generate
 npm run db:migrate
 ```
 
-The schema includes Better Auth's `user`, `session`, `account`, and `verification` tables, plus `profiles`, `profile_details`, `billing_customers`, `payment_methods`, `releases`, `release_overrides`, `downloads`, `audit_logs`, `rate_limits`, `testimonials`, and the one-time `admin_bootstrap` marker. The existing `testimonials.quote` column remains the stored review message for backward compatibility. Do not replace the authentication tables with a separate password or session implementation.
+The app also initializes and upgrades its schema at startup through `ensureDatabaseSchema` in `src/db/index.ts`. The location and legacy-profile upgrades are applied there idempotently; Drizzle migrations `0004` and `0005` are no-op journal markers so running `db:migrate` before or after application startup cannot repeat their non-idempotent DDL. Keep runtime upgrades transactional/idempotent when changing this flow, and back up production data before deploying schema changes.
 
-Before handling a Better Auth API request, the server also runs idempotent `CREATE TABLE/INDEX IF NOT EXISTS` statements for these tables. This bootstraps a new or empty database without a separate migration command. It does not alter existing tables when columns or constraints change; continue to generate and apply Drizzle migrations for schema updates.
+The schema includes Better Auth's `user`, `session`, `account`, and `verification` tables, plus `profile_details`, `billing_customers`, `payment_methods`, `releases`, `release_overrides`, `downloads`, `audit_logs`, `rate_limits`, `testimonials`, and the one-time `admin_bootstrap` marker. The existing `testimonials.quote` column remains the stored review message for backward compatibility. Do not replace the authentication tables with a separate password or session implementation.
+
+### Data relationships and ownership
+
+- `user` is the canonical identity row. Better Auth's `user.name` is the single source of truth for the user's full name; account edits update it directly.
+- `profile_details.userId` is a one-to-one extension of `user.id` and holds optional/required profile fields and the Cloudinary avatar URL. It has no separate copy of the user's name.
+- `session`, `account`, `profile_details`, `billing_customers`, `payment_methods`, and `downloads` reference `user` and are removed with it. `downloads.releaseId` references a shared `releases` record; release data is not user-owned.
+- `testimonials.userId` links a review to its author. New linked reviews display `user.name` and store only a generic fallback in the review row; old or anonymous unlinked reviews retain their display-name snapshot. `reviewedBy`, `release_overrides.updatedBy`, `admin_bootstrap.completedBy`, and audit actor references are nullable references to `user`.
+- `release_overrides` and `releases` are shared site data; they are not deleted when a user account is deleted.
+
+At startup, the runtime schema migration consolidates the legacy `profiles` table into `user` + `profile_details`: it copies `fullName` into `user.name`, moves `phoneNumber` into `profile_details`, then removes the duplicate table in a write transaction. Do not manually drop tables or edit production data.
+
+### Request and profile flow
+
+1. Better Auth authenticates the request. Protected Route Handlers call `getPrincipal` and authorize against the server-side user row before reading or mutating user data.
+2. The account page reads `user.name` and its `profile_details` row through `/api/profile`. Profile edits update the canonical name and profile extension in one database batch; independent browser form drafts stay in component state.
+3. Avatar bytes are sent to the authenticated avatar Route Handler, validated there, and uploaded with a server-generated Cloudinary signature to `privsentinel/profile_images/<user-hash>`. Only the returned HTTPS URL is stored in `profile_details.avatar`; Cloudinary credentials never reach the browser.
+4. The navbar and account page share the same in-memory profile query. The query cache is not persisted; the only persisted browser value is the non-sensitive navigation density preference.
+
+### Account deletion flow
+
+1. The authenticated user types `DELETE` in Account settings and confirms. The browser sends the Better Auth `delete-user` request; Better Auth validates the session and expires the session cookie.
+2. Before deleting the identity row, the server removes the user's Stripe customer (if present), Cloudinary avatar (if present), authored testimonials, personal audit records, email-verification records, and user-scoped rate-limit keys. Failure to remove an external billing or image resource prevents deletion and returns an error so the user can retry.
+3. Better Auth deletes the `user` row. Foreign-key cascades remove linked sessions, provider credentials, profile details, billing/payment records, and download history; `SET NULL` relationships preserve only non-user-owned records where applicable.
+4. On success, the browser clears the TanStack Query cache and persisted `privsentinel-ui-preferences` preference, then redirects to the home page. No auth tokens or profile data are stored in localStorage.
+
+Before handling a Better Auth API request, the server runs idempotent table creation, missing-column upgrades, and the legacy-profile migration. This bootstraps a new or existing database without requiring a separate migration command; keep this runtime path synchronized with `src/db/schema.ts` and preserve the migration ordering documented above.
 
 Existing testimonials are backfilled as approved only if they already have an `approvedAt` timestamp, but legacy rows do not receive public-display consent and therefore remain hidden. New reviews are private by default and require both explicit public consent and an administrator approval before `/api/testimonials` returns them. No reviews or ratings are seeded or fabricated.
 
@@ -85,7 +112,7 @@ For Google OAuth:
 3. Add `${BETTER_AUTH_URL}/api/auth/callback/google` as an authorized redirect URI.
 4. After OAuth, the user is sent to profile completion before download access is enabled.
 
-Password reset requires a verified sender and Resend API key. Configure `RESEND_API_KEY` and `RESEND_FROM_EMAIL`; reset requests intentionally return a generic success message to avoid account enumeration.
+Password reset and email verification use Gmail SMTP over TLS on `smtp.gmail.com:465`. Configure `GMAIL_SMTP_USER` and `GMAIL_APP_PASSWORD` locally and as server-only Vercel environment variables; the sender is the configured Gmail account. Reset requests intentionally return a generic success message to avoid account enumeration.
 
 ## Profile photos and billing cards
 
@@ -131,24 +158,23 @@ The only role field is Better Auth's server-controlled `user.role`; registration
 To initialize the first super administrator:
 
 1. Apply the reviewed migrations to Turso and deploy the app.
-2. Set `INITIAL_SUPER_ADMIN_EMAIL` to the exact email intended for the first administrator and `SUPER_ADMIN_BOOTSTRAP_SECRET` to a separate random secret of at least 32 characters. Keep both values server-side; never use a `NEXT_PUBLIC_` prefix.
-3. Register that account (email/password or Google OAuth), then sign in as it.
-4. Visit `/admin/bootstrap`, enter the bootstrap secret, and complete setup. The endpoint requires the signed-in designated account, checks that no super administrator or completed bootstrap exists, and records the promotion atomically.
-5. Remove both bootstrap variables from the deployment and redeploy. The database completion marker also makes subsequent attempts non-promoting.
+2. Set `INITIAL_SUPER_ADMIN_EMAIL` to the exact email intended for the first administrator. Keep it server-side; never use a `NEXT_PUBLIC_` prefix.
+3. Configure `GMAIL_SMTP_USER` and `GMAIL_APP_PASSWORD`. Email/password registration and sign-in require email verification; Better Auth sends verification links through Gmail SMTP.
+4. Register or sign in with the designated account, then open its email verification link. For an existing signed-in account, `/admin/bootstrap` can send a rate-limited verification email.
+5. Visit `/admin/bootstrap` and select **Initialize super administrator**. The endpoint confirms the authenticated account is the configured email and that Turso marks it verified, promotes it transactionally, and records a one-time completion marker. Bootstrap attempts are rate-limited per account and source address and will not replace a different existing super administrator.
+6. After setup, remove `INITIAL_SUPER_ADMIN_EMAIL` from the deployment and redeploy. The database completion marker prevents the bootstrap flow from running again.
 
 Do not grant roles by accepting client-submitted role values or by adding a public role-assignment endpoint. For later administration use the protected dashboard. Role changes, suspensions, releases, review moderation, authentication, and downloads are audited. User reviews can be edited or deleted by their owner; approved reviews are public only when the author gave display permission.
 
 The admin overview includes account totals, role distribution, recent registrations and activity; user search/details/role and status management; testimonial moderation; release metadata and publication controls; download counts; and read-only security/audit activity. Release installer files remain in GitHub Releases. Release metadata overrides live in Turso.
 
-## Production deployment
+## Vercel deployment
 
-For Cloudflare Workers, use the repository's OpenNext adapter and the `npm run deploy` script. Configure all server-only values as encrypted Cloudflare secrets/variables, including `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `BETTER_AUTH_SECRET`; set production canonical URLs and apply reviewed Turso migrations before enabling account workflows. Google OAuth must use the production callback `${BETTER_AUTH_URL}/api/auth/callback/google`; configure the Resend sender for password reset.
+Import the Git repository into Vercel and keep the detected Next.js framework settings. The project uses Next.js's standard `npm run build` command and Node.js runtime; no platform adapter or custom output directory is required. Add the required server-side values from `.env.example` in the Vercel project's Environment Variables settings for Production and Preview as appropriate. Do not expose secrets with a `NEXT_PUBLIC_` prefix.
 
-`wrangler.jsonc` names the Worker `privsentinel` and binds `WORKER_SELF_REFERENCE` to the same service name. If Wrangler reports error 10143 that the referenced Worker does not exist, verify that the Worker has been created in the same Cloudflare account and that the deployment config's `name` and service binding both match its exact name. This is a deployment binding error, distinct from Worker runtime error 1101. Source-map upload is enabled; retain the OpenNext-generated maps when deploying so production stack traces can be mapped to source files.
+Set `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL` to the canonical production origin, and set the Google OAuth redirect URI to `${BETTER_AUTH_URL}/api/auth/callback/google`. Add `GMAIL_SMTP_USER` and `GMAIL_APP_PASSWORD` as server-only variables for email verification and password-reset delivery. Add all three Cloudinary settings as server-side variables if avatar uploads are enabled.
 
-The dependency-free `/api/health` route checks Worker request handling without touching Better Auth or Turso. For temporary runtime tracing, set the server-only `WORKER_DIAGNOSTICS=true` variable, reproduce one request, and then unset it. Diagnostic entries contain only fixed operation labels, state, elapsed time, and error class; they never include request data, credentials, cookies, or database URLs.
-
-Cache Components/PPR are disabled in `next.config.ts`: local OpenNext preview reproduced 1101 on `/` with `cacheComponents: true`, including when `partialPrefetching` was false; the same routes returned 200 with Cache Components disabled. Re-enable only after validating the exact Next.js/OpenNext combination on a Cloudflare Worker runtime.
+Apply and review Turso migrations from a trusted environment before enabling account workflows. Vercel deploys automatically from the connected Git repository; the standard `npm run build` script is also used for local production-build checks. The dependency-free `/api/health` route is available for basic deployment health checks.
 
 Run database migration commands from a trusted deployment environment with the correct Turso URL and token:
 
@@ -156,7 +182,6 @@ Run database migration commands from a trusted deployment environment with the c
 npm run db:generate
 # Review the generated SQL, especially changes to existing data and constraints.
 npm run db:migrate
-npm run deploy
 ```
 
 Do not run migrations against a production database until the generated SQL has been reviewed and the deployment is authorized.
@@ -167,5 +192,6 @@ Do not run migrations against a production database until the generated SQL has 
 - The endpoint rate-limits downloads and streams only the current stable `.exe` after validating its GitHub repository, release tag, asset name, and HTTPS host. The request is recorded in Turso without storing download IP addresses or user agents.
 - Authentication uses Better Auth's CSRF/session protections. Profile writes validate same-origin requests. Common security headers are configured in `next.config.ts`.
 - GitHub release assets may be publicly accessible at GitHub URLs. Account gating protects access through this website; it cannot prevent a person from sharing an installer they already downloaded or a public release URL.
-- The site stores account email/name, required profile phone number and gender, and optional avatar/organization/position, download history, release metadata, and minimal audit events. If Stripe billing is configured, it also stores Stripe customer/payment-method identifiers and non-sensitive card display details; raw card numbers and security codes are never stored. Do not collect extra personal or device data without a documented purpose and privacy disclosure.
+- The site stores account email/name, required profile phone number and gender, and optional location/avatar/organization/position, download history, release metadata, and minimal audit events. Profile image uploads are limited to 1 MB. If Stripe billing is configured, it also stores Stripe customer/payment-method identifiers and non-sensitive card display details; raw card numbers and security codes are never stored. Do not collect extra personal or device data without a documented purpose and privacy disclosure.
+- New profile photo uploads are validated and signed server-side, stored in Cloudinary under `privsentinel/profile_images/`, and saved in Turso as secure image URLs. Configure the three Cloudinary settings above as server-side Vercel environment variables; do not prefix them with `NEXT_PUBLIC_` or commit their values. Older avatar data URIs remain readable until the account owner uploads a replacement; account deletion also attempts to remove legacy `privsentinel/avatars/` objects.
 - Never commit `.env`; keep all credentials out of browser bundles and logs. Review the application's privacy notice and applicable data-protection obligations before public launch.

@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { getPublicAppUrl } from "@/lib/env";
 
 const publicRoutes = [
   "",
@@ -14,7 +15,7 @@ const publicRoutes = [
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const configuredUrl = getPublicAppUrl();
   if (!configuredUrl) return [];
 
   const baseUrl = configuredUrl.replace(/\/+$/, "");

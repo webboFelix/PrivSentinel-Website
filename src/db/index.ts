@@ -1,10 +1,6 @@
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { getDatabaseConfig } from "@/lib/env";
-import {
-  diagnoseWorkerOperation,
-  diagnoseWorkerSyncOperation,
-} from "@/lib/worker-diagnostics";
 import { schema } from "./schema";
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
@@ -15,8 +11,8 @@ let schemaInitialization: Promise<void> | undefined;
 
 export function getDb() {
   if (!database) {
-    const config = diagnoseWorkerSyncOperation("db.client.initialize", getDatabaseConfig);
-    client = diagnoseWorkerSyncOperation("db.client.create", () => createClient(config));
+    const config = getDatabaseConfig();
+    client = createClient(config);
     database = drizzle(client, { schema });
   }
   return database;
@@ -24,8 +20,8 @@ export function getDb() {
 
 export function getLibsqlClient() {
   if (!client) {
-    const config = diagnoseWorkerSyncOperation("db.client.initialize", getDatabaseConfig);
-    client = diagnoseWorkerSyncOperation("db.client.create", () => createClient(config));
+    const config = getDatabaseConfig();
+    client = createClient(config);
   }
   return client;
 }
@@ -78,19 +74,13 @@ const schemaStatements = [
     "createdAt" integer NOT NULL,
     "updatedAt" integer NOT NULL
   )`,
-  `CREATE TABLE IF NOT EXISTS "profiles" (
-    "id" text PRIMARY KEY NOT NULL,
-    "userId" text NOT NULL UNIQUE REFERENCES "user"("id") ON DELETE CASCADE,
-    "fullName" text NOT NULL,
-    "phoneNumber" text,
-    "createdAt" integer NOT NULL,
-    "updatedAt" integer NOT NULL
-  )`,
   `CREATE TABLE IF NOT EXISTS "profile_details" (
     "userId" text PRIMARY KEY NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+    "phoneNumber" text,
     "gender" text,
     "organization" text,
     "currentPosition" text,
+    "location" text,
     "avatar" text,
     "createdAt" integer NOT NULL,
     "updatedAt" integer NOT NULL
@@ -225,9 +215,11 @@ const additiveColumnMigrations = [
   {
     table: "profile_details",
     columns: [
+      { name: "phoneNumber", definition: "text" },
       { name: "gender", definition: "text" },
       { name: "organization", definition: "text" },
       { name: "currentPosition", definition: "text" },
+      { name: "location", definition: "text" },
       { name: "avatar", definition: "text" },
       { name: "createdAt", definition: "integer" },
       { name: "updatedAt", definition: "integer" },
@@ -271,20 +263,101 @@ async function addMissingColumns() {
   }
 }
 
+async function migrateLegacyProfiles() {
+  const transaction = await getLibsqlClient().transaction("write");
+  try {
+    const result = await transaction.execute(
+      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'profiles' LIMIT 1`,
+    );
+    if (!result.rows.length) {
+      await transaction.commit();
+      return;
+    }
+
+    await transaction.execute(
+      `UPDATE "user" SET
+        "name" = COALESCE(
+          (SELECT NULLIF("fullName", '') FROM "profiles" WHERE "profiles"."userId" = "user"."id"),
+          "name"
+        ),
+        "updatedAt" = COALESCE(
+          (SELECT "updatedAt" FROM "profiles" WHERE "profiles"."userId" = "user"."id"),
+          "updatedAt"
+        )
+      WHERE EXISTS (SELECT 1 FROM "profiles" WHERE "profiles"."userId" = "user"."id")`,
+    );
+    await transaction.execute(
+      `INSERT INTO "profile_details" ("userId", "phoneNumber", "createdAt", "updatedAt")
+        SELECT "userId", "phoneNumber", "createdAt", "updatedAt"
+        FROM "profiles" AS legacy
+        WHERE NOT EXISTS (
+          SELECT 1 FROM "profile_details" AS details WHERE details."userId" = legacy."userId"
+        )`,
+    );
+    await transaction.execute(
+      `UPDATE "profile_details" SET "phoneNumber" = (
+        SELECT "phoneNumber" FROM "profiles" WHERE "profiles"."userId" = "profile_details"."userId"
+      )
+      WHERE "phoneNumber" IS NULL AND EXISTS (
+        SELECT 1 FROM "profiles" WHERE "profiles"."userId" = "profile_details"."userId"
+      )`,
+    );
+    await transaction.execute(`DROP TABLE "profiles"`);
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
+async function removeLegacyTestimonialMessageColumn() {
+  const transaction = await getLibsqlClient().transaction("write");
+  try {
+    const tableInfo = await transaction.execute(`PRAGMA table_info("testimonials")`);
+    if (!tableInfo.rows.some((column) => String(column.name) === "message")) {
+      await transaction.commit();
+      return;
+    }
+
+    await transaction.execute(
+      `UPDATE "testimonials" SET "quote" = "message"
+       WHERE ("quote" IS NULL OR TRIM("quote") = '')
+         AND "message" IS NOT NULL AND TRIM("message") <> ''`,
+    );
+    const conflicts = await transaction.execute(
+      `SELECT COUNT(*) AS count FROM "testimonials"
+       WHERE "message" IS NOT NULL AND TRIM("message") <> ''
+         AND "quote" IS NOT NULL AND TRIM("quote") <> ''
+         AND "message" <> "quote"`,
+    );
+    if (Number(conflicts.rows[0]?.count ?? 0) > 0) {
+      throw new Error(
+        'Cannot remove legacy testimonials.message because it conflicts with testimonials.quote.',
+      );
+    }
+
+    await transaction.execute(`ALTER TABLE "testimonials" DROP COLUMN "message"`);
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
 export function ensureDatabaseSchema(): Promise<void> {
   if (!schemaInitialization) {
-    schemaInitialization = diagnoseWorkerOperation("db.schema.initialize", async () => {
-      await diagnoseWorkerOperation("db.schema.create-tables", () =>
-        getLibsqlClient().batch(schemaStatements, "write"),
-      );
-      await diagnoseWorkerOperation("db.schema.migrate-columns", () => addMissingColumns());
+    schemaInitialization = (async () => {
+      await getLibsqlClient().batch(schemaStatements, "write");
+      await addMissingColumns();
+      await migrateLegacyProfiles();
+      await removeLegacyTestimonialMessageColumn();
       await getLibsqlClient().execute(
         `CREATE UNIQUE INDEX IF NOT EXISTS "testimonials_userId_unique" ON "testimonials" ("userId")`,
       );
       await getLibsqlClient().execute(
         `CREATE INDEX IF NOT EXISTS "testimonials_status_idx" ON "testimonials" ("status")`,
       );
-    }).catch((error: unknown) => {
+    })().catch((error: unknown) => {
       schemaInitialization = undefined;
       throw error;
     });

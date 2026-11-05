@@ -4,6 +4,9 @@ import { admin, createAccessControl } from "better-auth/plugins";
 import { getDb } from "@/db";
 import { auditLogs, schema } from "@/db/schema";
 import { getAuthConfigurationStatus, getServerEnv } from "@/lib/env";
+import { cleanAccountDataBeforeDeletion } from "@/services/account-deletion";
+import { enforceRateLimit, enforceRateLimitBySubject } from "@/lib/rate-limit";
+import { sendGmailEmail } from "@/lib/gmail-email";
 
 const statements = {
   user: ["create", "list", "set-role", "ban", "impersonate", "impersonate-admins", "delete", "set-password", "set-email", "get", "update"],
@@ -26,7 +29,7 @@ function createAuth() {
   }
   const env = getServerEnv();
   const googleConfigured = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
-  const appUrl = env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  const appUrl = env.BETTER_AUTH_URL ?? env.NEXT_PUBLIC_APP_URL;
   const trustedOrigins = new Set([appUrl ?? "http://localhost:3000"]);
   if (process.env.NODE_ENV === "development") {
     for (const host of ["localhost", "127.0.0.1"]) {
@@ -36,6 +39,12 @@ function createAuth() {
   }
 
   return betterAuth({
+    user: {
+      deleteUser: {
+        enabled: true,
+        beforeDelete: cleanAccountDataBeforeDeletion,
+      },
+    },
     database: drizzleAdapter(getDb(), {
       provider: "sqlite",
       schema: {
@@ -51,27 +60,49 @@ function createAuth() {
     trustedOrigins: [...trustedOrigins],
     emailAndPassword: {
       enabled: true,
+      requireEmailVerification: true,
       minPasswordLength: 12,
       maxPasswordLength: 128,
       sendResetPassword: async ({ user, url }) => {
-        if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) {
+        if (!env.GMAIL_SMTP_USER || !env.GMAIL_APP_PASSWORD) {
           throw new Error("Password reset email delivery is not configured.");
         }
         const safeUrl = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-        const response = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.RESEND_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from: env.RESEND_FROM_EMAIL,
-            to: [user.email],
-            subject: "Reset your PrivSentinel password",
-            html: `<p>Use this secure link to reset your PrivSentinel password:</p><p><a href="${safeUrl}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`,
-          }),
+        await sendGmailEmail({
+          user: env.GMAIL_SMTP_USER,
+          appPassword: env.GMAIL_APP_PASSWORD,
+          to: user.email,
+          subject: "Reset your PrivSentinel password",
+          html: `<p>Use this secure link to reset your PrivSentinel password:</p><p><a href="${safeUrl}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`,
+          operation: "password-reset",
         });
-        if (!response.ok) throw new Error("Password reset email could not be delivered.");
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      sendOnSignIn: true,
+      autoSignInAfterVerification: true,
+      expiresIn: 3600,
+      sendVerificationEmail: async ({ user, url }, request) => {
+        if (!env.GMAIL_SMTP_USER || !env.GMAIL_APP_PASSWORD) {
+          throw new Error("Email verification delivery is not configured.");
+        }
+        const [subjectAllowed, addressAllowed] = await Promise.all([
+          enforceRateLimitBySubject("email-verification", user.id, 3, 3600),
+          request ? enforceRateLimit(request, "email-verification", 10, 3600) : Promise.resolve(true),
+        ]);
+        if (!subjectAllowed || !addressAllowed) {
+          throw new Error("Email verification requests are temporarily rate-limited.");
+        }
+        const safeUrl = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        await sendGmailEmail({
+          user: env.GMAIL_SMTP_USER,
+          appPassword: env.GMAIL_APP_PASSWORD,
+          to: user.email,
+          subject: "Verify your PrivSentinel email",
+          html: `<p>Confirm your email address to secure your PrivSentinel account:</p><p><a href="${safeUrl}">Verify email address</a></p><p>This link expires in one hour. If you did not create this account, you can ignore this email.</p>`,
+          operation: "email-verification",
+        });
       },
     },
     socialProviders: googleConfigured

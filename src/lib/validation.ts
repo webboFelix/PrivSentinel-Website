@@ -35,4 +35,5 @@ export const profileSchema = z.object({
   gender: z.enum(["male", "female", "other"]),
   organization: z.string().trim().max(150, "Organization must be 150 characters or fewer.").optional().transform((value) => value || null),
   currentPosition: z.string().trim().max(150, "Current position must be 150 characters or fewer.").optional().transform((value) => value || null),
+  location: z.string().trim().max(150, "Location must be 150 characters or fewer.").optional(),
 });

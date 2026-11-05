@@ -3,7 +3,6 @@ import { getDb } from "@/db";
 import { auditLogs, user } from "@/db/schema";
 import { getAuth } from "@/lib/auth";
 import { isAccountSuspended, isAdministrator } from "@/lib/permissions";
-import { diagnoseWorkerOperation } from "@/lib/worker-diagnostics";
 
 type AuthSession = NonNullable<Awaited<ReturnType<ReturnType<typeof getAuth>["api"]["getSession"]>>>;
 
@@ -12,30 +11,28 @@ export type Principal = {
   actor: {
     id: string;
     email: string;
+    emailVerified: boolean;
     name: string;
     role: string;
   };
 };
 
 export async function getPrincipal(requestHeaders: Headers): Promise<Principal | null> {
-  const session = await diagnoseWorkerOperation("auth.session.read", () =>
-    getAuth().api.getSession({ headers: requestHeaders }),
-  );
+  const session = await getAuth().api.getSession({ headers: requestHeaders });
   if (!session) return null;
 
-  const account = await diagnoseWorkerOperation("auth.principal.lookup", () =>
-    getDb().query.user.findFirst({
-      columns: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        banned: true,
-        banExpires: true,
-      },
-      where: eq(user.id, session.user.id),
-    }),
-  );
+  const account = await getDb().query.user.findFirst({
+    columns: {
+      id: true,
+      email: true,
+      emailVerified: true,
+      name: true,
+      role: true,
+      banned: true,
+      banExpires: true,
+    },
+    where: eq(user.id, session.user.id),
+  });
   if (!account || isAccountSuspended(account)) return null;
 
   return {
@@ -43,6 +40,7 @@ export async function getPrincipal(requestHeaders: Headers): Promise<Principal |
     actor: {
       id: account.id,
       email: account.email,
+      emailVerified: account.emailVerified,
       name: account.name,
       role: account.role,
     },

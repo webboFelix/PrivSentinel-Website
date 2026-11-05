@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb, getLibsqlClient } from "@/db";
-import { auditLogs, downloads, profileDetails, profiles, session, user } from "@/db/schema";
+import { auditLogs, downloads, profileDetails, session, user } from "@/db/schema";
 import { isResponse, requireAdminApi } from "@/lib/admin-api";
 import { canManageRole, isAccountSuspended } from "@/lib/permissions";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
@@ -26,7 +26,7 @@ export async function GET(request: Request, context: RouteContext<"/api/admin/us
   const account = await db.select({
     id: user.id,
     name: user.name,
-    fullName: profiles.fullName,
+    fullName: user.name,
     email: user.email,
     role: user.role,
     createdAt: user.createdAt,
@@ -34,11 +34,11 @@ export async function GET(request: Request, context: RouteContext<"/api/admin/us
     banned: user.banned,
     banReason: user.banReason,
     banExpires: user.banExpires,
-    phoneNumber: profiles.phoneNumber,
+    phoneNumber: profileDetails.phoneNumber,
     organization: profileDetails.organization,
     currentPosition: profileDetails.currentPosition,
+    location: profileDetails.location,
   }).from(user)
-    .leftJoin(profiles, eq(user.id, profiles.userId))
     .leftJoin(profileDetails, eq(user.id, profileDetails.userId))
     .where(eq(user.id, id))
     .limit(1);

@@ -4,12 +4,37 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { authClient } from "@/lib/auth-client";
 
-export function SuperAdminBootstrap() {
+export function SuperAdminBootstrap({ email, emailVerified }: { email: string; emailVerified: boolean }) {
   const router = useRouter();
-  const [secret, setSecret] = useState("");
+  const queryClient = useQueryClient();
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function sendVerificationEmail() {
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      const result = await authClient.sendVerificationEmail({
+        email,
+        callbackURL: "/admin/bootstrap",
+      });
+      if (result.error) {
+        throw new Error(result.error.status === 429
+          ? "Verification email requests are temporarily rate-limited. Wait before trying again."
+          : "Verification email could not be sent. Confirm GMAIL_SMTP_USER is the Gmail account for GMAIL_APP_PASSWORD, then check the server email-delivery logs.");
+      }
+      setNotice("If the email provider accepted the request, a verification link will arrive shortly. Check your inbox and spam folder.");
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : "Verification email could not be sent. Please try again later.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,12 +43,13 @@ export function SuperAdminBootstrap() {
     try {
       const response = await fetch("/api/admin/bootstrap", {
         method: "POST",
-        headers: { "x-super-admin-bootstrap-secret": secret },
         cache: "no-store",
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "Administrator setup could not be completed.");
-      router.push("/admin");
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      router.replace("/admin");
+      router.refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Administrator setup could not be completed.");
     } finally {
@@ -37,13 +63,17 @@ export function SuperAdminBootstrap() {
       <section className="auth-card">
         <span className="auth-eyebrow">ONE-TIME SECURITY SETUP</span>
         <h1>Initialize administrator access</h1>
-        <p className="auth-description">Sign in with the designated initial administrator account and enter the deployment bootstrap secret. Setup is disabled after successful initialization.</p>
+        <p className="auth-description">Only the signed-in, email-verified account designated by the server can initialize the first super administrator. This one-time setup is disabled after completion.</p>
         {error && <p className="auth-message error" role="alert">{error}</p>}
-        <form className="auth-form" onSubmit={(event) => void submit(event)}>
-          <label htmlFor="bootstrap-secret">Bootstrap secret</label>
-          <input id="bootstrap-secret" type="password" autoComplete="current-password" required value={secret} onChange={(event) => setSecret(event.target.value)} />
-          <button type="submit" className="auth-submit" disabled={busy}>{busy ? "Initializing…" : "Initialize super administrator"}</button>
-        </form>
+        {notice && <p className="auth-message success" role="status">{notice}</p>}
+        {!emailVerified
+          ? <div className="auth-form">
+              <p className="auth-description">Verify {email} first. We send a verification link to the address on your account.</p>
+              <button type="button" className="auth-submit" disabled={busy} onClick={() => void sendVerificationEmail()}>{busy ? "Sending…" : "Send verification email"}</button>
+            </div>
+          : <form className="auth-form" onSubmit={(event) => void submit(event)}>
+              <button type="submit" className="auth-submit" disabled={busy}>{busy ? "Checking account…" : "Initialize super administrator"}</button>
+            </form>}
         <p className="auth-back-link"><Link href="/dashboard">Return to account</Link></p>
       </section>
     </div>

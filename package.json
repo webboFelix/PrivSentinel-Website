@@ -10,26 +10,26 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
-    "@opennextjs/cloudflare": "^1.20.16",
+    "@tanstack/react-query": "^5.106.0",
     "better-auth": "^1.7.15",
     "drizzle-orm": "^0.45.4",
     "lucide-react": "^1.67.0",
     "next": "^16.4.5",
+    "nodemailer": "^10.3.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "stripe": "^23.1.0",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.11",
@@ -37,7 +37,6 @@
     "eslint-config-next": "^16.4.5",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.12",
-    "wrangler": "^4.157.0"
+    "vitest": "^4.1.12"
   }
 }

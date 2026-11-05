@@ -43,6 +43,7 @@ describe("account profile validation", () => {
       gender: "other" as const,
       organization: "  Sentinel Labs  ",
       currentPosition: "  Analyst  ",
+      location: "  Nairobi, Kenya  ",
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -50,6 +51,7 @@ describe("account profile validation", () => {
         gender: "other",
         organization: "Sentinel Labs",
         currentPosition: "Analyst",
+        location: "Nairobi, Kenya",
       });
     }
   });
@@ -57,5 +59,6 @@ describe("account profile validation", () => {
   it("rejects unsupported gender values and overlong optional fields", () => {
     expect(profileSchema.safeParse({ ...validProfile, gender: "unspecified" }).success).toBe(false);
     expect(profileSchema.safeParse({ ...validProfile, organization: "x".repeat(151) }).success).toBe(false);
+    expect(profileSchema.safeParse({ ...validProfile, location: "x".repeat(151) }).success).toBe(false);
   });
 });

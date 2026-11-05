@@ -6,7 +6,6 @@ import { getAuth } from "@/lib/auth";
 import { recordAudit } from "@/lib/authorization";
 import { getAuthConfigurationStatus } from "@/lib/env";
 import { isAdministrator } from "@/lib/permissions";
-import { diagnoseWorkerOperation } from "@/lib/worker-diagnostics";
 
 async function handleAuthRequest(request: Request) {
   await connection();
@@ -24,7 +23,7 @@ async function handleAuthRequest(request: Request) {
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
-  await diagnoseWorkerOperation("auth.schema.initialize", ensureDatabaseSchema);
+  await ensureDatabaseSchema();
 
   const path = new URL(request.url).pathname;
   let attemptedAdminId: string | null = null;
@@ -37,19 +36,15 @@ async function handleAuthRequest(request: Request) {
     }
     if (typeof body === "object" && body !== null && "email" in body && typeof body.email === "string") {
       const email = body.email.trim().toLowerCase();
-      const account = await diagnoseWorkerOperation("auth.admin-login.lookup", () =>
-        getDb().query.user.findFirst({
-          columns: { id: true, role: true },
-          where: eq(user.email, email),
-        }),
-      );
+      const account = await getDb().query.user.findFirst({
+        columns: { id: true, role: true },
+        where: eq(user.email, email),
+      });
       if (account && isAdministrator(account)) attemptedAdminId = account.id;
     }
   }
 
-  const response = await diagnoseWorkerOperation("auth.handler", () =>
-    getAuth().handler(request),
-  );
+  const response = await getAuth().handler(request);
   if (attemptedAdminId && response.status >= 400) {
     await recordAudit({
       action: "auth.admin_login.failed",

@@ -3,23 +3,17 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { connection } from "next/server";
 import { ensureDatabaseSchema, getDb } from "@/db";
-import { testimonials } from "@/db/schema";
+import { profileDetails, testimonials, user } from "@/db/schema";
 import { getPrincipal, recordAudit } from "@/lib/authorization";
 import { getServerEnv } from "@/lib/env";
 import { enforceRateLimit, isSameOriginRequest } from "@/lib/rate-limit";
-import { diagnoseWorkerOperation } from "@/lib/worker-diagnostics";
 
 export const testimonialSchema = z.object({
   rating: z.number().int().min(1).max(5),
   title: z.string().trim().min(3).max(100),
   message: z.string().trim().min(20).max(2_000),
   designation: z.string().trim().max(100).optional().transform((value) => value || null),
-  publicConsent: z.boolean(),
-  displayNameConsent: z.boolean(),
-}).strict().refine((value) => !value.displayNameConsent || value.publicConsent, {
-  path: ["displayNameConsent"],
-  message: "Allow public display before choosing to show your name.",
-});
+}).strict();
 
 function errorResponse(code: string, message: string, status = 503) {
   return Response.json({ code, error: message }, {
@@ -34,45 +28,45 @@ export async function GET() {
   if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) {
     return errorResponse("not_configured", "Testimonials are not configured yet. Please check back later.");
   }
-  await diagnoseWorkerOperation("testimonials.schema.initialize", ensureDatabaseSchema);
+  await ensureDatabaseSchema();
 
   const db = getDb();
   const approved = and(
     eq(testimonials.status, "approved"),
-    eq(testimonials.publicConsent, true),
     gte(testimonials.rating, 1),
     lte(testimonials.rating, 5),
     ne(testimonials.title, ""),
     ne(testimonials.quote, ""),
   );
-  const [records, [aggregate]] = await diagnoseWorkerOperation("testimonials.public.read", () =>
-    Promise.all([
-      db.select({
-        id: testimonials.id,
-        name: testimonials.name,
-        displayNameConsent: testimonials.displayNameConsent,
-        designation: testimonials.designation,
-        title: testimonials.title,
-        message: testimonials.quote,
-        rating: testimonials.rating,
-        submittedAt: testimonials.createdAt,
-      }).from(testimonials)
-        .where(approved)
-        .orderBy(desc(testimonials.approvedAt))
-        .limit(12),
-      db.select({
-        count: count(),
-        average: avg(testimonials.rating),
-      }).from(testimonials).where(approved),
-    ]),
-  );
+  const [records, [aggregate]] = await Promise.all([
+    db.select({
+      id: testimonials.id,
+      name: user.name,
+      fallbackName: testimonials.name,
+      avatar: profileDetails.avatar,
+      designation: testimonials.designation,
+      title: testimonials.title,
+      message: testimonials.quote,
+      rating: testimonials.rating,
+      submittedAt: testimonials.createdAt,
+    }).from(testimonials)
+      .leftJoin(user, eq(testimonials.userId, user.id))
+      .leftJoin(profileDetails, eq(testimonials.userId, profileDetails.userId))
+      .where(approved)
+      .orderBy(desc(testimonials.approvedAt))
+      .limit(12),
+    db.select({
+      count: count(),
+      average: avg(testimonials.rating),
+    }).from(testimonials).where(approved),
+  ]);
   return Response.json({
     reviews: records.filter((review) =>
       Number.isInteger(review.rating) && review.rating >= 1 && review.rating <= 5 &&
       review.title.trim().length > 0 && review.message.trim().length > 0,
-    ).map(({ displayNameConsent, ...review }) => ({
+    ).map(({ fallbackName, ...review }) => ({
       ...review,
-      name: displayNameConsent ? review.name : "PrivSentinel user",
+      name: review.name || fallbackName || "PrivSentinel user",
     })),
     summary: {
       count: aggregate?.count ?? 0,
@@ -118,14 +112,12 @@ export async function POST(request: Request) {
 
   const review = {
     id: randomUUID(),
-    name: principal.actor.name,
+    name: "PrivSentinel user",
     location: null,
     quote: parsed.data.message,
     title: parsed.data.title,
     userId: principal.actor.id,
     designation: parsed.data.designation,
-    publicConsent: parsed.data.publicConsent,
-    displayNameConsent: parsed.data.publicConsent && parsed.data.displayNameConsent,
     status: "pending",
     rating: parsed.data.rating,
     approvedAt: null,
