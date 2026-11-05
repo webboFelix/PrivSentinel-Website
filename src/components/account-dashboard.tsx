@@ -25,10 +25,13 @@ import { DottedLoader } from "@/components/dotted-loader";
 import { useAccountDataQuery, useProfileQuery, useSaveProfileMutation, useAvatarMutation } from "@/hooks/use-profile";
 import { useQueryClient } from "@tanstack/react-query";
 import { clearUiPreferences, useUiPreferencesStore } from "@/stores/ui-preferences-store";
+import { CountrySelect } from "@/components/country-select";
+import { callingCodeForCountry } from "@/lib/countries";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 type DownloadEntry = { assetName: string; downloadedAt: string; version: string; releaseName: string };
 type SavedPaymentMethod = { id: string; brand: string; last4: string; expiryMonth: number; expiryYear: number };
-type ProfileDraft = { fullName: string; phoneNumber: string; gender: string; organization: string; currentPosition: string; location: string };
+type ProfileDraft = { fullName: string; phoneNumber: string; phoneCountry: string; countryCode: string; city: string; region: string; gender: string; organization: string; currentPosition: string };
 
 export function AccountDashboard() {
   const router = useRouter();
@@ -53,11 +56,16 @@ export function AccountDashboard() {
   const saving = saveProfileMutation.isPending;
   const avatarSaving = avatarMutation.isPending;
   const fullName = profileDraft.fullName ?? profile?.fullName ?? session?.user.name ?? "";
-  const phoneNumber = profileDraft.phoneNumber ?? profile?.phoneNumber ?? "";
+  const phoneCountry = profileDraft.phoneCountry ?? profile?.phoneCountry ?? parsePhoneNumberFromString(profile?.phoneNumber ?? "")?.country ?? "";
+  const phoneNumber = profileDraft.phoneNumber ?? (profile?.phoneNumber
+    ? parsePhoneNumberFromString(profile.phoneNumber)?.formatNational() ?? profile.phoneNumber
+    : "");
+  const countryCode = profileDraft.countryCode ?? profile?.countryCode ?? "";
+  const city = profileDraft.city ?? profile?.city ?? "";
+  const region = profileDraft.region ?? profile?.region ?? "";
   const gender = profileDraft.gender ?? profile?.gender ?? "";
   const organization = profileDraft.organization ?? profile?.organization ?? "";
   const currentPosition = profileDraft.currentPosition ?? profile?.currentPosition ?? "";
-  const location = profileDraft.location ?? profile?.location ?? "";
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [billingBusy, setBillingBusy] = useState(false);
@@ -117,7 +125,17 @@ export function AccountDashboard() {
     setNotice("");
     setError("");
     try {
-      await saveProfileMutation.mutateAsync({ fullName, phoneNumber, gender, organization, currentPosition, location });
+      await saveProfileMutation.mutateAsync({
+        fullName,
+        phoneNumber,
+        phoneCountry,
+        countryCode,
+        city,
+        region,
+        gender,
+        organization,
+        currentPosition,
+      });
       setProfileDraft({});
       setNotice("Your profile has been saved. Downloads are now enabled.");
     } catch (saveError) {
@@ -219,7 +237,7 @@ export function AccountDashboard() {
       <div className="account-main">
         <Link className="account-back" href="/"><ArrowLeft size={14} /> Back to home</Link>
         <div className="account-welcome"><div><span className="section-kicker">ACCOUNT OVERVIEW</span><h1>Welcome back, {profile?.fullName || session.user.name?.split(" ")[0] || "there"}.</h1><p>Manage your PrivSentinel account and protected downloads.</p><div className="account-badges">{accountRole !== "user" && <span>Role: {accountRole.replace("_", " ")}</span>}<span className={`admin-status is-${accountStatus}`}>Status: {accountStatus}</span>{(accountRole === "admin" || accountRole === "super_admin") && <Link href="/admin">Open administration</Link>}</div></div><div className="account-shield">{avatar ? <Image className="account-avatar-image" src={avatar} alt="Your profile avatar" width={53} height={53} unoptimized /> : <ShieldCheck size={26} />}</div></div>
-        {!loading && (!profile?.phoneNumber || !profile.gender) && <div className="profile-required" role="status"><ShieldCheck size={17} /> Add your phone number and select your gender to complete your profile and enable downloads.</div>}
+        {!loading && (!profile?.phoneNumber || !profile.gender || !profile.countryCode) && <div className="profile-required" role="status"><ShieldCheck size={17} /> Add your country, phone number, and gender to complete your profile and enable downloads.</div>}
         {requestError && <p className="account-message error" role="alert">{requestError}</p>}
         {notice && <p className="account-message success" role="status"><CheckCircle2 size={16} /> {notice}</p>}
         {loading ? <div className="account-loading"><DottedLoader label="Loading account details…" /></div> : (
@@ -233,11 +251,16 @@ export function AccountDashboard() {
               </div>
               <form className="profile-form" onSubmit={(event) => void saveProfile(event)}>
                 <label>Full name<input required minLength={2} maxLength={100} value={fullName} onChange={(event) => updateProfileDraft("fullName", event.target.value)} autoComplete="name" /></label>
-                <label>Phone number<input required type="tel" value={phoneNumber} onChange={(event) => updateProfileDraft("phoneNumber", event.target.value)} placeholder="+254 712 345 678" autoComplete="tel" /></label>
+                <label>Country<CountrySelect value={countryCode} required autoComplete="country" onChange={(value) => updateProfileDraft("countryCode", value)} /></label>
+                <div className="phone-number-field">
+                  <label>Phone country code<CountrySelect value={phoneCountry} phoneCode required autoComplete="tel-country-code" onChange={(value) => updateProfileDraft("phoneCountry", value)} /></label>
+                  <label>Phone number<input required type="tel" value={phoneNumber} onChange={(event) => updateProfileDraft("phoneNumber", event.target.value)} placeholder={`${callingCodeForCountry(phoneCountry)} 712 345 678`} autoComplete="tel-national" /></label>
+                </div>
                 {profile?.gender ? <div className="saved-profile-value"><strong>Gender</strong><span>{profile.gender[0].toUpperCase() + profile.gender.slice(1)}</span></div> : <fieldset className="gender-options" aria-describedby="account-gender-required"><legend>Gender <span className="gender-required">Required</span></legend>{(["male", "female", "other"] as const).map((option) => <label key={option}><input type="radio" name="gender" value={option} required checked={gender === option} onChange={() => updateProfileDraft("gender", option)} /> {option[0].toUpperCase() + option.slice(1)}</label>)}<small id="account-gender-required">Select an option to complete your profile.</small></fieldset>}
+                <label>City <span className="optional-label">(optional)</span><input maxLength={100} value={city} onChange={(event) => updateProfileDraft("city", event.target.value)} placeholder="City or town" autoComplete="address-level2" /></label>
+                <label>State or region <span className="optional-label">(optional)</span><input maxLength={100} value={region} onChange={(event) => updateProfileDraft("region", event.target.value)} placeholder="State, province, or region" autoComplete="address-level1" /></label>
                 <label>Organization <span className="optional-label">(optional)</span><input maxLength={150} value={organization} onChange={(event) => updateProfileDraft("organization", event.target.value)} placeholder="Company or organization" autoComplete="organization" /></label>
                 <label>Current position <span className="optional-label">(optional)</span><input maxLength={150} value={currentPosition} onChange={(event) => updateProfileDraft("currentPosition", event.target.value)} placeholder="Your role or position" autoComplete="organization-title" /></label>
-                <label>Location <span className="optional-label">(optional)</span><input maxLength={150} value={location} onChange={(event) => updateProfileDraft("location", event.target.value)} placeholder="City, region, or country" autoComplete="address-level2" /></label>
                 <button className="auth-submit" type="submit" disabled={saving}>{saving ? "Saving…" : "Save profile"} <CheckCircle2 size={16} /></button>
               </form>
               <div className="account-detail account-date"><span><CalendarDays size={14} /> Registered</span><strong>{new Date(session.user.createdAt).toLocaleDateString()}</strong></div>
@@ -245,7 +268,7 @@ export function AccountDashboard() {
             <section className="account-panel downloads-panel">
               <div className="account-panel-heading"><span className="account-panel-icon"><Download size={18} /></span><div><h2>Protected downloads</h2><p>Latest stable Windows installer</p></div></div>
               <div className="download-callout"><span className="download-callout-icon"><ArrowDownToLine size={20} /></span><div><strong>PrivSentinel for Windows</strong><small>Windows 10 / 11 · Stable channel</small></div><span className="download-status">ACCOUNT<br />VERIFIED</span></div>
-              {profile?.phoneNumber && profile.gender ? <a className="download-button account-download" href="/api/downloads/latest"><ArrowDownToLine size={17} /> Download latest installer</a> : <button className="download-button account-download" disabled><ArrowDownToLine size={17} /> Complete profile to download</button>}
+              {profile?.phoneNumber && profile.gender && profile.countryCode ? <a className="download-button account-download" href="/api/downloads/latest"><ArrowDownToLine size={17} /> Download latest installer</a> : <button className="download-button account-download" disabled><ArrowDownToLine size={17} /> Complete profile to download</button>}
               <div id="download-history" className="account-panel-heading history-heading"><span className="account-panel-icon"><Clock3 size={18} /></span><div><h2>Download history</h2><p>Your recent installer activity</p></div></div>
               {history.length === 0 ? <p className="history-empty">No downloads yet. Your downloaded releases will appear here.</p> : <ul className="download-history">{history.map((item, index) => <li key={`${item.downloadedAt}-${index}`}><span><strong>{item.version}</strong><small>{item.assetName}</small></span><time>{new Date(item.downloadedAt).toLocaleDateString()}</time></li>)}</ul>}
             </section>
@@ -294,7 +317,7 @@ export function AccountDashboard() {
             </div>
           )}
         </section>}
-        <p className="account-privacy">Your phone number and gender complete your account profile. Gender, organization, current position, and profile photo are not shown publicly; organization and current position are optional.</p>
+        <p className="account-privacy">Your country, phone number, and gender complete your account profile. Gender, organization, current position, and profile photo are not shown publicly; city, region, organization, and current position are optional.</p>
       </div>
     </main>
   );

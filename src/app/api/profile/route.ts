@@ -20,7 +20,12 @@ export async function GET(request: Request) {
     profile: details ? {
       fullName: principal.actor.name,
       phoneNumber: details.phoneNumber,
+      phoneCountry: details.phoneCountry,
+      phoneCountryCode: details.phoneCountryCode,
       gender: details.gender,
+      countryCode: details.countryCode,
+      city: details.city,
+      region: details.region,
       organization: details.organization,
       currentPosition: details.currentPosition,
       location: details.location,
@@ -66,6 +71,8 @@ export async function POST(request: Request) {
   const location = Object.hasOwn(parsed.data, "location")
     ? parsed.data.location || null
     : existingDetails?.location ?? null;
+  const city = Object.hasOwn(parsed.data, "city") ? parsed.data.city : existingDetails?.city ?? null;
+  const region = Object.hasOwn(parsed.data, "region") ? parsed.data.region : existingDetails?.region ?? null;
   if (existingDetails?.gender && existingDetails.gender !== parsed.data.gender) {
     return Response.json({
       error: "Your saved gender cannot be changed from Account settings.",
@@ -77,11 +84,17 @@ export async function POST(request: Request) {
   await getLibsqlClient().batch([
     {
       sql: `INSERT INTO "profile_details"
-        ("userId", "phoneNumber", "gender", "organization", "currentPosition", "location", "createdAt", "updatedAt")
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ("userId", "phoneNumber", "phoneCountry", "phoneCountryCode", "gender", "countryCode", "city", "region",
+          "organization", "currentPosition", "location", "createdAt", "updatedAt")
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT("userId") DO UPDATE SET
           "phoneNumber" = excluded."phoneNumber",
+          "phoneCountry" = excluded."phoneCountry",
+          "phoneCountryCode" = excluded."phoneCountryCode",
           "gender" = excluded."gender",
+          "countryCode" = excluded."countryCode",
+          "city" = excluded."city",
+          "region" = excluded."region",
           "organization" = excluded."organization",
           "currentPosition" = excluded."currentPosition",
           "location" = excluded."location",
@@ -89,7 +102,12 @@ export async function POST(request: Request) {
       args: [
         principal.actor.id,
         parsed.data.phoneNumber,
+        parsed.data.phoneCountry,
+        parsed.data.phoneCountryCode,
         parsed.data.gender,
+        parsed.data.countryCode,
+        city,
+        region,
         parsed.data.organization,
         parsed.data.currentPosition,
         location,

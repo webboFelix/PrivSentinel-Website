@@ -10,13 +10,14 @@ import {
 describe("download authorization", () => {
   it("rejects missing profiles and profiles without phone number or gender", () => {
     expect(canDownload(null)).toBe(false);
-    expect(canDownload({ fullName: "Ada", phoneNumber: null, gender: "female" })).toBe(false);
-    expect(canDownload({ fullName: "Ada", phoneNumber: " ", gender: "female" })).toBe(false);
-    expect(canDownload({ fullName: "Ada", phoneNumber: "+254712345678", gender: null })).toBe(false);
+    expect(canDownload({ fullName: "Ada", phoneNumber: null, gender: "female", countryCode: "KE" })).toBe(false);
+    expect(canDownload({ fullName: "Ada", phoneNumber: " ", gender: "female", countryCode: "KE" })).toBe(false);
+    expect(canDownload({ fullName: "Ada", phoneNumber: "+254712345678", gender: null, countryCode: "KE" })).toBe(false);
+    expect(canDownload({ fullName: "Ada", phoneNumber: "+254712345678", gender: "female", countryCode: null })).toBe(false);
   });
 
   it("allows downloads only when all required profile fields are complete", () => {
-    expect(canDownload({ fullName: "Ada Lovelace", phoneNumber: "+254712345678", gender: "female" })).toBe(true);
+    expect(canDownload({ fullName: "Ada Lovelace", phoneNumber: "+254712345678", gender: "female", countryCode: "KE" })).toBe(true);
   });
 });
 

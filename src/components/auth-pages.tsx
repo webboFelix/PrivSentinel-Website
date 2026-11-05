@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { registrationSchema } from "@/lib/validation";
+import { passwordSchema, registrationSchema } from "@/lib/validation";
+import { CountrySelect } from "@/components/country-select";
+import { callingCodeForCountry } from "@/lib/countries";
 
 function safeNextPath() {
   const requested = new URLSearchParams(window.location.search).get("next");
@@ -50,7 +52,7 @@ function AuthShell({ children, eyebrow, title, description, authAvailable = true
     <main className="auth-page">
       <div className="auth-backdrop" />
       <div className="auth-wrap">
-        <Link className="auth-brand" href="/"><Image className="auth-brand-logo" src="/PrivSentinel.png" alt="" width={42} height={42} /><span className="brand-name">Priv<span>Sentinel</span></span></Link>
+        <Link className="auth-brand" href="/"><Image className="auth-brand-logo" src="/PrivSentinel.png" alt="" width={42} height={42} loading="eager" /><span className="brand-name">Priv<span>Sentinel</span></span></Link>
         <section className="auth-card">
           <div className="auth-card-mark"><ShieldCheck size={24} /></div>
           <span className="auth-eyebrow">{eyebrow}</span>
@@ -68,7 +70,7 @@ function AuthShell({ children, eyebrow, title, description, authAvailable = true
 
 export function RegisterPage({ authAvailable, googleConfigured }: { authAvailable: boolean; googleConfigured: boolean }) {
   const router = useRouter();
-  const [values, setValues] = useState({ fullName: "", email: "", phoneNumber: "", gender: "", password: "", confirmPassword: "" });
+  const [values, setValues] = useState({ fullName: "", email: "", phoneNumber: "", phoneCountry: "", countryCode: "", gender: "", password: "", confirmPassword: "" });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [emailVerificationPending, setEmailVerificationPending] = useState(false);
@@ -125,6 +127,8 @@ export function RegisterPage({ authAvailable, googleConfigured }: { authAvailabl
       fullName: values.fullName,
       email: values.email,
       phoneNumber: values.phoneNumber,
+      phoneCountry: values.phoneCountry,
+      countryCode: values.countryCode,
       gender: values.gender,
       password: values.password,
     });
@@ -170,7 +174,13 @@ export function RegisterPage({ authAvailable, googleConfigured }: { authAvailabl
       const profileResponse = await fetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName: parsed.data.fullName, phoneNumber: parsed.data.phoneNumber, gender: parsed.data.gender }),
+        body: JSON.stringify({
+          fullName: parsed.data.fullName,
+          phoneNumber: values.phoneNumber,
+          phoneCountry: values.phoneCountry,
+          countryCode: values.countryCode,
+          gender: parsed.data.gender,
+        }),
       });
       if (!profileResponse.ok) {
         setError("Your account was created, but the profile could not be saved. Sign in and complete your profile before downloading.");
@@ -195,7 +205,11 @@ export function RegisterPage({ authAvailable, googleConfigured }: { authAvailabl
         <label>Full name<input autoComplete="name" value={values.fullName} onChange={update("fullName")} placeholder="Your full name" aria-invalid={Boolean(fieldErrors.fullName)} />{fieldErrors.fullName && <small>{fieldErrors.fullName}</small>}</label>
         <label>Email address<input type="email" autoComplete="email" value={values.email} onChange={update("email")} placeholder="you@example.com" aria-invalid={Boolean(fieldErrors.email)} />{fieldErrors.email && <small>{fieldErrors.email}</small>}</label>
         <fieldset className="auth-gender-options" aria-describedby={fieldErrors.gender ? "register-gender-error" : undefined}><legend>Gender <span>Required</span></legend>{(["male", "female", "other"] as const).map((option) => <label key={option}><input type="radio" name="registration-gender" value={option} required checked={values.gender === option} onChange={() => { setValues((current) => ({ ...current, gender: option })); setFieldErrors((current) => ({ ...current, gender: "" })); }} /> {option[0].toUpperCase() + option.slice(1)}</label>)}{fieldErrors.gender && <small id="register-gender-error">{fieldErrors.gender}</small>}</fieldset>
-        <label>Phone number<input type="tel" autoComplete="tel" value={values.phoneNumber} onChange={update("phoneNumber")} placeholder="+254 712 345 678" aria-invalid={Boolean(fieldErrors.phoneNumber)} />{fieldErrors.phoneNumber && <small>{fieldErrors.phoneNumber}</small>}</label>
+        <label>Country<CountrySelect value={values.countryCode} required autoComplete="country" onChange={(countryCode) => { setValues((current) => ({ ...current, countryCode })); setFieldErrors((current) => ({ ...current, countryCode: "" })); }} />{fieldErrors.countryCode && <small>{fieldErrors.countryCode}</small>}</label>
+        <div className="phone-number-field">
+          <label>Phone country code<CountrySelect value={values.phoneCountry} phoneCode required autoComplete="tel-country-code" onChange={(phoneCountry) => { setValues((current) => ({ ...current, phoneCountry })); setFieldErrors((current) => ({ ...current, phoneCountry: "", phoneNumber: "" })); }} />{fieldErrors.phoneCountry && <small>{fieldErrors.phoneCountry}</small>}</label>
+          <label>Phone number<input required type="tel" autoComplete="tel-national" value={values.phoneNumber} onChange={update("phoneNumber")} placeholder={`${callingCodeForCountry(values.phoneCountry)} 712 345 678`} aria-invalid={Boolean(fieldErrors.phoneNumber)} />{fieldErrors.phoneNumber && <small>{fieldErrors.phoneNumber}</small>}</label>
+        </div>
         <label>Password<span className="password-input"><input type={showPassword ? "text" : "password"} autoComplete="new-password" minLength={12} maxLength={128} value={values.password} onChange={update("password")} placeholder="At least 12 characters" aria-invalid={Boolean(fieldErrors.password)} aria-describedby="password-requirements" /><button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((show) => !show)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span><small id="password-requirements">Use 12–128 characters with uppercase and lowercase letters, a number, and a symbol.</small>{fieldErrors.password && <small>{fieldErrors.password}</small>}</label>
         <label>Confirm password<input type="password" autoComplete="new-password" value={values.confirmPassword} onChange={update("confirmPassword")} placeholder="Enter your password again" aria-invalid={Boolean(fieldErrors.confirmPassword)} />{fieldErrors.confirmPassword && <small>{fieldErrors.confirmPassword}</small>}</label>
         {error && <p className="auth-message error" role="alert">{error}</p>}
@@ -242,8 +256,8 @@ export function LoginPage({ authAvailable, googleConfigured }: { authAvailable: 
     }
     const profileResponse = await fetch("/api/profile");
     if (profileResponse.ok) {
-      const body = await profileResponse.json() as { profile: { phoneNumber: string | null; gender: string | null } | null };
-      if (!body.profile?.phoneNumber || !body.profile.gender) {
+      const body = await profileResponse.json() as { profile: { phoneNumber: string | null; gender: string | null; countryCode: string | null } | null };
+      if (!body.profile?.phoneNumber || !body.profile.gender || !body.profile.countryCode) {
         router.push("/account?completeProfile=1");
         return;
       }
@@ -342,7 +356,7 @@ export function ResetPasswordPage() {
       setError("This reset link is invalid or expired. Request a new one.");
       return;
     }
-    const parsed = registrationSchema.shape.password.safeParse(password);
+    const parsed = passwordSchema.safeParse(password);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Choose a stronger password.");
       return;

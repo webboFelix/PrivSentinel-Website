@@ -63,7 +63,12 @@ export const verification = sqliteTable("verification", {
 export const profileDetails = sqliteTable("profile_details", {
   userId: text("userId").primaryKey().references(() => user.id, { onDelete: "cascade" }),
   phoneNumber: text("phoneNumber"),
+  phoneCountry: text("phoneCountry"),
+  phoneCountryCode: text("phoneCountryCode"),
   gender: text("gender"),
+  countryCode: text("countryCode"),
+  city: text("city"),
+  region: text("region"),
   organization: text("organization"),
   currentPosition: text("currentPosition"),
   location: text("location"),

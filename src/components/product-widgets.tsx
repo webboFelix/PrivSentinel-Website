@@ -180,7 +180,7 @@ function ConfiguredInstallerAccessLink({ tagName, size }: { tagName: string; siz
   if (profileQuery.isPending) {
     return <button className="release-download" type="button" disabled><Download size={17} /> Checking download access…</button>;
   }
-  if (profileQuery.data?.profile?.phoneNumber && profileQuery.data.profile.gender) {
+  if (profileQuery.data?.profile?.phoneNumber && profileQuery.data.profile.gender && profileQuery.data.profile.countryCode) {
     return <a className="release-download" href="/api/downloads/latest"><Download size={17} /> Download Windows Installer ({tagName}) <span>— {bytes(size)}</span></a>;
   }
   const label = profileQuery.error ? "Review account profile to download" : "Complete profile to download";

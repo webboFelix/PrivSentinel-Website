@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { DottedLoader } from "@/components/dotted-loader";
+import { countryOptions } from "@/lib/countries";
 
 type Role = "user" | "admin" | "super_admin";
 type Status = "active" | "suspended";
@@ -60,6 +61,9 @@ type UserDetail = {
     emailVerified: boolean;
     banReason: string | null;
     phoneNumber: string | null;
+    countryCode: string | null;
+    city: string | null;
+    region: string | null;
     organization: string | null;
     currentPosition: string | null;
     location: string | null;
@@ -289,7 +293,7 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
         <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-user-detail-title">
           <button type="button" className="admin-modal-close" onClick={() => setDetail(null)} aria-label="Close user details">×</button>
           <h2 id="admin-user-detail-title">{detail.user.displayName}</h2><p>{detail.user.email}</p>
-          <dl><dt>Role</dt><dd>{detail.user.role}</dd><dt>Status</dt><dd>{detail.user.status}{detail.user.banReason ? ` · ${detail.user.banReason}` : ""}</dd><dt>Registered</dt><dd>{formatDate(detail.user.createdAt)}</dd><dt>Last login</dt><dd>{formatDate(detail.user.lastLoginAt)}</dd><dt>Downloads</dt><dd>{detail.user.downloadCount}</dd><dt>Email verified</dt><dd>{detail.user.emailVerified ? "Yes" : "No"}</dd><dt>Organization</dt><dd>{detail.user.organization || "Not provided"}</dd><dt>Position</dt><dd>{detail.user.currentPosition || "Not provided"}</dd><dt>Location</dt><dd>{detail.user.location || "Not provided"}</dd></dl>
+          <dl><dt>Role</dt><dd>{detail.user.role}</dd><dt>Status</dt><dd>{detail.user.status}{detail.user.banReason ? ` · ${detail.user.banReason}` : ""}</dd><dt>Registered</dt><dd>{formatDate(detail.user.createdAt)}</dd><dt>Last login</dt><dd>{formatDate(detail.user.lastLoginAt)}</dd><dt>Downloads</dt><dd>{detail.user.downloadCount}</dd><dt>Email verified</dt><dd>{detail.user.emailVerified ? "Yes" : "No"}</dd><dt>Phone</dt><dd>{detail.user.phoneNumber || "Not provided"}</dd><dt>Country</dt><dd>{countryOptions.find((country) => country.code === detail.user.countryCode)?.name ?? detail.user.location ?? "Not provided"}</dd><dt>City</dt><dd>{detail.user.city || "Not provided"}</dd><dt>State or region</dt><dd>{detail.user.region || "Not provided"}</dd><dt>Organization</dt><dd>{detail.user.organization || "Not provided"}</dd><dt>Position</dt><dd>{detail.user.currentPosition || "Not provided"}</dd></dl>
           <h3>Recent account activity</h3>{detail.activity.length ? <ul className="admin-events">{detail.activity.map((event) => <li key={event.id}><span><strong>{event.action}</strong><small>{event.resource}</small></span><time>{formatDate(event.timestamp)}</time></li>)}</ul> : <p>No activity recorded.</p>}
         </section>
       </div>}

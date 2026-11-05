@@ -34,6 +34,7 @@ export async function GET(request: Request) {
     fullName: principal.actor.name,
     phoneNumber: profileDetailsRow.phoneNumber,
     gender: profileDetailsRow.gender,
+    countryCode: profileDetailsRow.countryCode,
   } : null)) {
     return Response.json({ error: "Complete your account profile before downloading.", profileUrl: "/account?completeProfile=1" }, { status: 403, headers: jsonHeaders });
   }

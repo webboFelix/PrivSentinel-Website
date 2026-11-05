@@ -43,6 +43,13 @@
       "when": 1793827978092,
       "tag": "0005_past_loki",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793839369491,
+      "tag": "0006_yellow_gambit",
+      "breakpoints": true
     }
   ]
 }

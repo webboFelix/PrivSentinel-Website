@@ -6,7 +6,12 @@ import { requestJson } from "@/lib/client-api";
 export type ProfileRecord = {
   fullName: string;
   phoneNumber: string | null;
+  phoneCountry: string | null;
+  phoneCountryCode: string | null;
   gender: "male" | "female" | "other" | null;
+  countryCode: string | null;
+  city: string | null;
+  region: string | null;
   organization: string | null;
   currentPosition: string | null;
   location: string | null;
@@ -37,10 +42,13 @@ export function useSaveProfileMutation(userId: string) {
     mutationFn: (profile: {
       fullName: string;
       phoneNumber: string;
+      phoneCountry: string;
+      countryCode: string;
+      city: string;
+      region: string;
       gender: string;
       organization: string;
       currentPosition: string;
-      location: string;
     }) => requestJson<{ success: true }>("/api/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
