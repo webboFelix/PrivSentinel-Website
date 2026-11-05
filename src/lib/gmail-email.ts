@@ -71,13 +71,6 @@ export async function sendGmailEmail(input: GmailEmailInput) {
     });
   } catch (error) {
     const failure = classifySmtpError(error);
-    console.error("[email-delivery]", {
-      operation: input.operation,
-      category: failure.category,
-      code: failure.code,
-      responseCode: failure.responseCode,
-      state: "failed",
-    });
     throw new Error(failure.message);
   } finally {
     transporter.close();

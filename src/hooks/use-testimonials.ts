@@ -46,8 +46,8 @@ function isPublicTestimonial(value: unknown): value is PublicTestimonial {
     typeof record.submittedAt === "string";
 }
 
-async function getPublicTestimonials(): Promise<PublicTestimonialsResponse> {
-  const result = await requestJson<unknown>("/api/testimonials");
+async function getPublicTestimonials(signal: AbortSignal): Promise<PublicTestimonialsResponse> {
+  const result = await requestJson<unknown>("/api/testimonials", { signal });
   if (typeof result !== "object" || result === null || !("reviews" in result) ||
       !Array.isArray(result.reviews) || !result.reviews.every(isPublicTestimonial) ||
       !("summary" in result) || typeof result.summary !== "object" || result.summary === null ||
@@ -61,7 +61,7 @@ async function getPublicTestimonials(): Promise<PublicTestimonialsResponse> {
 export function usePublicTestimonialsQuery() {
   return useQuery({
     queryKey: publicTestimonialsQueryKey,
-    queryFn: getPublicTestimonials,
+    queryFn: ({ signal }) => getPublicTestimonials(signal),
     staleTime: 5 * 60_000,
   });
 }

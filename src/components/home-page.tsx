@@ -17,6 +17,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { DemoPlayer, ReleaseSummary, TestimonialPreview } from "@/components/product-widgets";
+import { PwaInstallButton } from "@/components/pwa-install-button";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { useReleasesQuery } from "@/hooks/use-releases";
 
@@ -84,6 +85,7 @@ export function HomePage({ demoVideoUrl, authAvailable }: { demoVideoUrl: string
           <p><strong>Monitor. Protect. Stay in Control.</strong> Advanced endpoint security for a safer, more secure Windows experience.</p>
           <div className="home-hero-actions">
             <Link className="home-download-button" href="/download"><Monitor size={17} fill="currentColor" /> Download PrivSentinel <ArrowDownToLine size={16} /></Link>
+            <PwaInstallButton variant="hero" />
             <Link className="home-demo-button" href="/demo"><Play size={14} fill="currentColor" /> Watch Live Demo</Link>
           </div>
           <div className="hero-assurances">

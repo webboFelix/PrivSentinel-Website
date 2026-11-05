@@ -98,6 +98,7 @@ export function selectLatestStableRelease(releases: PublishedRelease[]) {
 async function fetchReleases(): Promise<PublishedRelease[]> {
   const { owner, repo } = getGitHubConfig();
   const { GITHUB_TOKEN } = getServerEnv();
+  const timeoutSignal = AbortSignal.timeout(8_000);
   const response = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=100`,
     {
@@ -107,8 +108,14 @@ async function fetchReleases(): Promise<PublishedRelease[]> {
         ...(GITHUB_TOKEN ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
       },
       next: { revalidate: 300 },
+      signal: timeoutSignal,
     },
-  );
+  ).catch(() => {
+    if (timeoutSignal.aborted) {
+      throw new GitHubReleaseError("GitHub took too long to respond. Please try again shortly.");
+    }
+    throw new GitHubReleaseError("Could not connect to GitHub. Check your connection and try again.");
+  });
 
   if (!response.ok) {
     if (response.status === 403 || response.status === 429) {
@@ -124,6 +131,9 @@ async function fetchReleases(): Promise<PublishedRelease[]> {
   try {
     payload = await response.json();
   } catch {
+    if (timeoutSignal.aborted) {
+      throw new GitHubReleaseError("GitHub took too long to respond. Please try again shortly.");
+    }
     throw new GitHubReleaseError("GitHub returned an invalid release response.");
   }
 

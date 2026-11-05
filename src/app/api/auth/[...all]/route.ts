@@ -11,10 +11,6 @@ async function handleAuthRequest(request: Request) {
   await connection();
   const configuration = getAuthConfigurationStatus();
   if (!configuration.available) {
-    console.error("[auth-configuration]", {
-      state: "unavailable",
-      missing: configuration.missing,
-    });
     return Response.json(
       {
         error: "Authentication is temporarily unavailable. Please contact the site administrator.",
@@ -44,17 +40,32 @@ async function handleAuthRequest(request: Request) {
     }
   }
 
-  const response = await getAuth().handler(request);
-  if (attemptedAdminId && response.status >= 400) {
-    await recordAudit({
-      action: "auth.admin_login.failed",
-      resource: "auth",
-      targetType: "user",
-      targetId: attemptedAdminId,
-      metadata: { method: "email", status: response.status },
-    });
+  try {
+    const response = await getAuth().handler(request);
+    if (attemptedAdminId && response.status >= 400) {
+      await recordAudit({
+        action: "auth.admin_login.failed",
+        resource: "auth",
+        targetType: "user",
+        targetId: attemptedAdminId,
+        metadata: { method: "email", status: response.status },
+      });
+    }
+    return response;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Authentication failed.";
+    return Response.json(
+      {
+        error: "Authentication is temporarily unavailable. Please try again in a moment.",
+        code: "auth_unavailable",
+        details: reason,
+      },
+      {
+        status: 503,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
   }
-  return response;
 }
 
 export const GET = handleAuthRequest;

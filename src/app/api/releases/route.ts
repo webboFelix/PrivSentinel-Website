@@ -16,6 +16,9 @@ export async function GET() {
     const message = error instanceof GitHubReleaseError
       ? error.message
       : "Release information is temporarily unavailable.";
-    return Response.json({ latest: null, history: [], error: message }, { status: 503 });
+    return Response.json({ latest: null, history: [], error: message }, {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 }

@@ -24,6 +24,7 @@ import { useProfileQuery } from "@/hooks/use-profile";
 import { useReleaseQuery, useReleasesQuery } from "@/hooks/use-releases";
 import { usePublicTestimonialsQuery } from "@/hooks/use-testimonials";
 import { formatTimeAgo } from "@/lib/time-ago";
+import { SlowLoadingNotice } from "@/components/slow-loading-notice";
 
 function bytes(value: number) {
   return value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
@@ -45,6 +46,7 @@ function ReleaseLoadingSkeleton({ compact }: { compact: boolean }) {
       <LoadingLine className="skeleton-line medium" />
       <LoadingLine className="skeleton-line wide" />
       <LoadingLine className="skeleton-button" />
+      <SlowLoadingNotice />
     </div>
   );
 }
@@ -245,7 +247,7 @@ export function TestimonialPreview() {
             ><div className="testimonial-stack" aria-live={isRotationPaused ? "polite" : "off"} aria-atomic="true">
               {currentReview && <article className="testimonial-card" key={currentReview.id}>
                 <span className="testimonial-avatar" aria-hidden="true">{currentReview.avatar
-                  ? <Image src={currentReview.avatar} alt="" width={42} height={42} unoptimized />
+                  ? <Image src={currentReview.avatar} alt="" fill sizes="42px" style={{ objectFit: "cover" }} unoptimized />
                   : currentReview.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
                 <div><div className="testimonial-stars" aria-label={`${currentReview.rating} out of 5 stars`}>{"★".repeat(currentReview.rating)}</div><h3>{currentReview.title}</h3><blockquote>“{currentReview.message}”</blockquote><strong>— {currentReview.name}{currentReview.designation ? `, ${currentReview.designation}` : ""}</strong><RelativeTime value={currentReview.submittedAt} /></div>
               </article>}
@@ -280,6 +282,7 @@ function TestimonialLoadingSkeleton() {
         <LoadingLine className="skeleton-avatar" />
         <div><LoadingLine className="skeleton-line short" /><LoadingLine className="skeleton-line wide" /><LoadingLine className="skeleton-line medium" /></div>
       </div>)}
+      <SlowLoadingNotice />
     </div>
   );
 }

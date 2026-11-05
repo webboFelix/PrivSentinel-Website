@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { getWindowsInstaller, parseGitHubReleases, selectLatestStableRelease } from "./github";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getAllReleases, getWindowsInstaller, parseGitHubReleases, selectLatestStableRelease } from "./github";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function release(overrides: Record<string, unknown> = {}) {
   return {
@@ -62,5 +66,17 @@ describe("GitHub release parsing", () => {
     expect(releases[0]?.tagName).toBe("v1.0.0");
     expect(releases[1]?.installer).toBeNull();
     expect(selectLatestStableRelease(releases)?.tagName).toBe("v1.0.0");
+  });
+
+  it("converts upstream network failures into a clean release error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+
+    await expect(getAllReleases()).rejects.toEqual(
+      expect.objectContaining({
+        name: "GitHubReleaseError",
+        message: "Could not connect to GitHub. Check your connection and try again.",
+      }),
+    );
+
   });
 });
