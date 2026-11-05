@@ -50,7 +50,7 @@ describe("sendGmailEmail", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("returns actionable authentication errors without logging credentials or addresses", async () => {
+  it("returns actionable authentication errors without logging", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     createTransport.mockReturnValue({
       sendMail: vi.fn().mockRejectedValue(Object.assign(new Error("sensitive provider details"), {
@@ -63,16 +63,7 @@ describe("sendGmailEmail", () => {
     await expect(sendGmailEmail(input))
       .rejects.toThrow("Gmail rejected SMTP authentication");
 
-    expect(log).toHaveBeenCalledWith("[email-delivery]", {
-      operation: "email-verification",
-      category: "authentication",
-      code: "EAUTH",
-      responseCode: 535,
-      state: "failed",
-    });
-    expect(JSON.stringify(log.mock.calls)).not.toContain(input.user);
-    expect(JSON.stringify(log.mock.calls)).not.toContain(input.to);
-    expect(JSON.stringify(log.mock.calls)).not.toContain(input.appPassword);
+    expect(log).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
   });
 });
