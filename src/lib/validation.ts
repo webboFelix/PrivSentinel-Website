@@ -46,9 +46,11 @@ export const passwordSchema = z.string()
   .regex(/\d/, "Include a number.")
   .regex(/[^A-Za-z0-9]/, "Include a symbol.");
 
+export const emailSchema = z.string().trim().toLowerCase().email("Enter a valid email address.");
+
 export const registrationSchema = withNormalizedPhone(z.object({
   fullName: z.string().trim().min(2, "Enter your full name.").max(100, "Name must be 100 characters or fewer."),
-  email: z.string().trim().toLowerCase().email("Enter a valid email address."),
+  email: emailSchema,
   countryCode: z.string().refine(isCountryCode, "Select your country."),
   ...phoneFields,
   gender: z.enum(["male", "female", "other"]),

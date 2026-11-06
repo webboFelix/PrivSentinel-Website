@@ -6,8 +6,31 @@ type GmailEmailInput = {
   to: string;
   subject: string;
   html: string;
-  operation: "password-reset" | "email-verification";
+  text?: string;
+  operation: "password-reset" | "email-verification" | "security-notice" | "contact-notification" | "contact-response";
 };
+
+const connectionErrorCodes = new Set([
+  "ECONNECTION",
+  "EDNS",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "ESOCKET",
+  "ETIMEDOUT",
+]);
+
+function isConnectionSetupError(error: unknown) {
+  if (typeof error !== "object" || error === null) return false;
+  return "command" in error
+    && error.command === "CONN"
+    && "code" in error
+    && typeof error.code === "string"
+    && connectionErrorCodes.has(error.code);
+}
 
 function classifySmtpError(error: unknown) {
   const smtpError = typeof error === "object" && error !== null ? error : {};
@@ -24,12 +47,12 @@ function classifySmtpError(error: unknown) {
       message: "Gmail rejected SMTP authentication. Confirm 2-Step Verification is enabled and GMAIL_APP_PASSWORD is a current app password for GMAIL_SMTP_USER.",
     };
   }
-  if (code === "ETIMEDOUT" || code === "ECONNECTION" || code === "ESOCKET" || code === "EDNS") {
+  if (connectionErrorCodes.has(code)) {
     return {
       code,
       responseCode,
       category: "connection",
-      message: "Could not connect securely to Gmail SMTP. Check the network and try again.",
+      message: "Could not connect to Gmail SMTP. Check that the server permits outbound SMTP on ports 465 and 587, then try again.",
     };
   }
   if (responseCode === 421 || responseCode === 450 || responseCode === 451 || responseCode === 454) {
@@ -49,30 +72,45 @@ function classifySmtpError(error: unknown) {
 }
 
 export async function sendGmailEmail(input: GmailEmailInput) {
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: {
-      user: input.user,
-      pass: input.appPassword.replace(/\s+/g, ""),
-    },
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
-  });
-
-  try {
-    await transporter.sendMail({
-      from: { name: "PrivSentinel", address: input.user },
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
+  let connectionError: unknown;
+  for (const [index, port] of [465, 587].entries()) {
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port,
+      secure: port === 465,
+      ...(port === 587 ? { requireTLS: true } : {}),
+      auth: {
+        user: input.user,
+        pass: input.appPassword.replace(/\s+/g, ""),
+      },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     });
-  } catch (error) {
-    const failure = classifySmtpError(error);
-    throw new Error(failure.message);
-  } finally {
-    transporter.close();
+
+    try {
+      await transporter.sendMail({
+        from: { name: "PrivSentinel", address: input.user },
+        to: input.to,
+        subject: input.subject,
+        html: input.html,
+        ...(input.text ? { text: input.text } : {}),
+      });
+      return;
+    } catch (error) {
+      if (index === 0 && isConnectionSetupError(error)) {
+        connectionError = error;
+      } else {
+        const failure = classifySmtpError(error);
+        const cause = connectionError
+          ? new AggregateError([connectionError, error], "Both Gmail SMTP connection methods failed.")
+          : error;
+        throw new Error(`Could not send ${input.operation} email. ${failure.message}`, { cause });
+      }
+    } finally {
+      transporter.close();
+    }
   }
+
+  throw new Error(`Could not send ${input.operation} email. Gmail SMTP connection failed.`);
 }

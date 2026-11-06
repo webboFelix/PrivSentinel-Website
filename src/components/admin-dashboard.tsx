@@ -56,6 +56,30 @@ type AuditEvent = {
   metadata: string | null;
   actorEmail: string | null;
 };
+type SecurityEvent = {
+  id: string;
+  userId: string | null;
+  email: string | null;
+  name: string | null;
+  ipAddress: string;
+  userAgent: string | null;
+  action: string;
+  createdAt: string;
+};
+type BlockedIp = {
+  ipAddress: string;
+  reason: string;
+  blockedAt: string;
+};
+type ContactMessage = {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  status: "new" | "in_progress" | "responded" | "closed";
+  response: string | null;
+  createdAt: string;
+};
 type UserDetail = {
   user: AdminUser & {
     emailVerified: boolean;
@@ -98,6 +122,9 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
   const [reviews, setReviews] = useState<Review[]>([]);
   const [releases, setReleases] = useState<Release[]>([]);
   const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
+  const [blockedIps, setBlockedIps] = useState<BlockedIp[]>([]);
+  const [contactMessages, setContactMessages] = useState<ContactMessage[]>([]);
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -126,6 +153,15 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
     const result = await api<{ events: AuditEvent[] }>("/api/admin/audit");
     setEvents(result.events);
   }, []);
+  const loadSecurity = useCallback(async () => {
+    const result = await api<{ events: SecurityEvent[]; blockedIps: BlockedIp[] }>("/api/admin/security");
+    setSecurityEvents(result.events);
+    setBlockedIps(result.blockedIps);
+  }, []);
+  const loadContactMessages = useCallback(async () => {
+    const result = await api<{ messages: ContactMessage[] }>("/api/admin/contact");
+    setContactMessages(result.messages);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -134,13 +170,14 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
         : section === "Users" ? loadUsers(false, 0)
           : section === "Testimonials & Reviews" ? loadReviews()
             : section === "Release management" ? loadReleases()
-              : loadEvents();
+              : section === "Contact messages" ? loadContactMessages()
+                : Promise.all([loadEvents(), loadSecurity()]);
       void request.catch((loadError: unknown) => {
         if (active) setError(loadError instanceof Error ? loadError.message : "The dashboard data could not be loaded.");
       });
     }, section === "Users" ? 200 : 0);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [section, loadEvents, loadOverview, loadReleases, loadReviews, loadUsers]);
+  }, [section, loadContactMessages, loadEvents, loadOverview, loadReleases, loadReviews, loadSecurity, loadUsers]);
 
   async function runAction(action: () => Promise<void>, success: string) {
     setBusy(true);
@@ -217,7 +254,35 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
     }, `Release ${release.tagName} was updated.`);
   }
 
-  const sections = ["Overview", "Users", "Testimonials & Reviews", "Release management", "Security & audit"];
+  async function changeIpBlock(ipAddress: string, action: "block" | "unblock") {
+    const reason = action === "block"
+      ? window.prompt("Why are you permanently blocking this IP? (at least five characters)")
+      : undefined;
+    if (action === "block" && (!reason || reason.trim().length < 5)) return;
+    if (action === "unblock" && !window.confirm(`Permanently unblock ${ipAddress}?`)) return;
+    await runAction(async () => {
+      const result = await api<{ notificationWarning?: string | null }>("/api/admin/security", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ipAddress, ...(reason ? { reason } : {}) }),
+      });
+      await Promise.all([loadSecurity(), loadEvents()]);
+      if (result.notificationWarning) throw new Error(result.notificationWarning);
+    }, action === "block" ? `IP address ${ipAddress} was blocked.` : `IP address ${ipAddress} was unblocked.`);
+  }
+
+  async function respondToContact(message: ContactMessage, response: string) {
+    await runAction(async () => {
+      await api(`/api/admin/contact/${encodeURIComponent(message.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ response }),
+      });
+      await loadContactMessages();
+    }, `Reply sent to ${message.email}.`);
+  }
+
+  const sections = ["Overview", "Users", "Testimonials & Reviews", "Release management", "Security & audit", "Contact messages"];
 
   return (
     <main className="admin-page">
@@ -274,7 +339,7 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
           {releases.length === 0 ? <p className="admin-empty">No GitHub releases are available.</p> : <div className="admin-release-list">{releases.map((release) => <ReleaseEditor key={release.tagName} release={release} disabled={busy} onSave={saveRelease} />)}</div>}
         </section>}
 
-        {section === "Security & audit" && <SecurityPanel events={events} onFilter={async (action) => {
+        {section === "Security & audit" && <SecurityPanel events={events} securityEvents={securityEvents} blockedIps={blockedIps} onBlock={(ip) => changeIpBlock(ip, "block")} onUnblock={(ip) => changeIpBlock(ip, "unblock")} onFilter={async (action) => {
           setBusy(true);
           setError("");
           try {
@@ -287,6 +352,16 @@ export function AdminDashboard({ role, currentUserId }: { role: string; currentU
           } finally {
             setBusy(false);
           }
+        }} />}
+        {section === "Contact messages" && <ContactMessagesPanel messages={contactMessages} busy={busy} onRespond={respondToContact} onStatusChange={async (message, status) => {
+          await runAction(async () => {
+            await api(`/api/admin/contact/${encodeURIComponent(message.id)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status }),
+            });
+            await loadContactMessages();
+          }, "Message status updated.");
         }} />}
       </div>
       {detail && <div className="admin-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}>
@@ -329,13 +404,89 @@ function ReleaseEditor({ release, disabled, onSave }: {
   </article>;
 }
 
-function SecurityPanel({ events, onFilter }: { events: AuditEvent[]; onFilter: (action: string) => Promise<void> }) {
+function describeUserAgent(userAgent: string | null) {
+  if (!userAgent) return "Unknown browser · unknown device";
+  const browser = /Edg\//.test(userAgent) ? "Edge"
+    : /Firefox\//.test(userAgent) ? "Firefox"
+      : /Chrome\//.test(userAgent) ? "Chrome"
+        : /Safari\//.test(userAgent) ? "Safari"
+          : "Unknown browser";
+  const device = /Android/i.test(userAgent) ? "Android"
+    : /iPhone|iPad/i.test(userAgent) ? "iOS"
+      : /Windows/i.test(userAgent) ? "Windows"
+        : /Mac OS/i.test(userAgent) ? "macOS"
+          : /Linux/i.test(userAgent) ? "Linux"
+            : "Unknown device";
+  return `${browser} · ${device}`;
+}
+
+function SecurityPanel({
+  events,
+  securityEvents,
+  blockedIps,
+  onBlock,
+  onUnblock,
+  onFilter,
+}: {
+  events: AuditEvent[];
+  securityEvents: SecurityEvent[];
+  blockedIps: BlockedIp[];
+  onBlock: (ip: string) => Promise<void>;
+  onUnblock: (ip: string) => Promise<void>;
+  onFilter: (action: string) => Promise<void>;
+}) {
   const [filter, setFilter] = useState("");
+  const blockedSet = new Set(blockedIps.map((item) => item.ipAddress));
+  return <>
+    <section className="admin-panel">
+      <div className="admin-section-heading"><div><h2>Suspicious sign-in activity</h2><p>Ten failed sign-ins from one IP within 15 minutes trigger a permanent block. Review shared-network users carefully.</p></div></div>
+      {securityEvents.length ? <div className="admin-table-wrap"><table><thead><tr><th>User</th><th>IP address</th><th>Browser / device</th><th>Event</th><th>Time</th><th>Action</th></tr></thead><tbody>{securityEvents.map((event) => <tr key={event.id}>
+        <td>{event.name || "Unknown user"}<br /><small>{event.email || "No account matched"}</small></td>
+        <td>{event.ipAddress}</td><td>{describeUserAgent(event.userAgent)}</td><td>{event.action}</td><td>{formatDate(event.createdAt)}</td>
+        <td>{blockedSet.has(event.ipAddress)
+          ? <button type="button" onClick={() => void onUnblock(event.ipAddress)}>Unblock IP</button>
+          : <button type="button" onClick={() => void onBlock(event.ipAddress)}>Block IP forever</button>}</td>
+      </tr>)}</tbody></table></div> : <p className="admin-empty">No suspicious sign-in events recorded.</p>}
+    </section>
+    <section className="admin-panel">
+      <h2>Blocked IP addresses</h2>
+      {blockedIps.length ? <div className="admin-table-wrap"><table><thead><tr><th>IP address</th><th>Reason</th><th>Blocked</th><th>Action</th></tr></thead><tbody>{blockedIps.map((item) => <tr key={item.ipAddress}><td>{item.ipAddress}</td><td>{item.reason}</td><td>{formatDate(item.blockedAt)}</td><td><button type="button" onClick={() => void onUnblock(item.ipAddress)}>Unblock</button></td></tr>)}</tbody></table></div> : <p className="admin-empty">No IP addresses are blocked.</p>}
+    </section>
+    <section className="admin-panel">
+      <div className="admin-section-heading"><div><h2>Security &amp; audit activity</h2><p>Authentication events, account changes, downloads, and release actions.</p></div>
+        <label>Action filter<input value={filter} maxLength={100} placeholder="e.g. auth.admin_login" onChange={(event) => setFilter(event.target.value)} /></label>
+        <button className="admin-secondary-button" type="button" onClick={() => void onFilter(filter)}>Filter</button>
+      </div>
+      {events.length ? <ul className="admin-events">{events.map((event) => <li key={event.id}><span><strong>{event.action}</strong><small>{event.actorEmail || "System"} · {event.resource}{event.targetType ? ` · ${event.targetType}: ${event.targetId}` : ""}</small>{event.metadata && <small>{event.metadata}</small>}</span><time>{formatDate(event.timestamp)}</time></li>)}</ul> : <p>No matching security events.</p>}
+    </section>
+  </>;
+}
+
+function ContactMessagesPanel({
+  messages,
+  busy,
+  onRespond,
+  onStatusChange,
+}: {
+  messages: ContactMessage[];
+  busy: boolean;
+  onRespond: (message: ContactMessage, response: string) => Promise<void>;
+  onStatusChange: (message: ContactMessage, status: ContactMessage["status"]) => Promise<void>;
+}) {
+  const [responses, setResponses] = useState<Record<string, string>>({});
   return <section className="admin-panel">
-    <div className="admin-section-heading"><div><h2>Security &amp; audit activity</h2><p>Authentication events, account changes, downloads, and release actions. Audit records are read-only here.</p></div>
-      <label>Action filter<input value={filter} maxLength={100} placeholder="e.g. auth.admin_login" onChange={(event) => setFilter(event.target.value)} /></label>
-      <button className="admin-secondary-button" type="button" onClick={() => void onFilter(filter)}>Filter</button>
-    </div>
-    {events.length ? <ul className="admin-events">{events.map((event) => <li key={event.id}><span><strong>{event.action}</strong><small>{event.actorEmail || "System"} · {event.resource}{event.targetType ? ` · ${event.targetType}: ${event.targetId}` : ""}</small>{event.metadata && <small>{event.metadata}</small>}</span><time>{formatDate(event.timestamp)}</time></li>)}</ul> : <p>No matching security events.</p>}
+    <div className="admin-section-heading"><div><h2>Contact inbox</h2><p>Newest messages appear first. Replies are emailed to the sender.</p></div></div>
+    {messages.length ? <div className="admin-contact-list">{messages.map((message) => <article className="admin-review" key={message.id}>
+      <header><span className={`admin-status is-${message.status}`}>{message.status.replace("_", " ")}</span><time>{formatDate(message.createdAt)}</time></header>
+      <h3>{message.name}</h3><a href={`mailto:${encodeURIComponent(message.email)}`}>{message.email}</a>
+      <p className="contact-message-body">{message.message}</p>
+      {message.response && <p className="auth-message success">Previous response: {message.response}</p>}
+      <label>Reply<textarea rows={4} maxLength={5000} value={responses[message.id] ?? ""} onChange={(event) => setResponses((current) => ({ ...current, [message.id]: event.target.value }))} placeholder="Write a response to this message" /></label>
+      <div className="admin-actions">
+        <button type="button" disabled={busy || !(responses[message.id] ?? "").trim()} onClick={() => void onRespond(message, responses[message.id] ?? "")}>Send reply &amp; resolve</button>
+        {message.status !== "in_progress" && <button type="button" disabled={busy} onClick={() => void onStatusChange(message, "in_progress")}>Mark in progress</button>}
+        {message.status !== "closed" && <button type="button" disabled={busy} onClick={() => void onStatusChange(message, "closed")}>Close</button>}
+      </div>
+    </article>)}</div> : <p className="admin-empty">No contact messages yet.</p>}
   </section>;
 }

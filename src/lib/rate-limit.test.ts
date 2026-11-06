@@ -6,10 +6,15 @@ vi.mock("@/db", () => ({
   getLibsqlClient: () => ({ execute }),
 }));
 
-import { enforceRateLimit, enforceRateLimitBySubject } from "./rate-limit";
+import {
+  checkRateLimitBySubject,
+  enforceRateLimit,
+  enforceRateLimitBySubject,
+} from "./rate-limit";
 
 afterEach(() => {
   execute.mockReset();
+  vi.restoreAllMocks();
 });
 
 describe("rate limits", () => {
@@ -23,6 +28,14 @@ describe("rate limits", () => {
       args: expect.arrayContaining([`bootstrap:${expectedHash}`]),
     }));
     expect(JSON.stringify(execute.mock.calls)).not.toContain("admin-user-id");
+  });
+
+  it("returns the exact remaining time for a rejected fixed-window limit", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(13_590_000);
+    execute.mockResolvedValue({ rows: [{ count: 4, windowStart: 10_000 }] });
+
+    await expect(checkRateLimitBySubject("email-verification", "user-1", 3, 3600))
+      .resolves.toEqual({ allowed: false, retryAfterSeconds: 10 });
   });
 
   it("uses Vercel's request IP headers rather than untrusted forwarded values", async () => {

@@ -12,7 +12,7 @@ export default function AdminPage() {
 
 async function AdminContent() {
   await connection();
-  const principal = await getPrincipal(await headers());
+  const principal = await getPrincipal(await headers(), true);
   if (!principal || (principal.actor.role !== "admin" && principal.actor.role !== "super_admin")) {
     return <AdminAccessDenied description="Sign in with an administrator account to access this page." />;
   }

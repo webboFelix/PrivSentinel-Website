@@ -108,11 +108,11 @@ export function ReleaseSummary({ compact = false, authAvailable = false }: { com
   const selectedVersion = compact ? null : searchParams.get("version");
   const releasesQuery = useReleasesQuery();
   const selectedReleaseQuery = useReleaseQuery(selectedVersion);
-  const data = releasesQuery.data;
-  const selectedRelease = selectedReleaseQuery.data?.release;
+  const data = hydrated ? releasesQuery.data : undefined;
+  const selectedRelease = hydrated ? selectedReleaseQuery.data?.release : undefined;
   const selectedError = selectedReleaseQuery.error
     ? releaseErrorMessage(selectedReleaseQuery.error, selectedReleaseQuery.error.message)
-    : selectedVersion && selectedReleaseQuery.data && !selectedRelease
+    : hydrated && selectedVersion && selectedReleaseQuery.data && !selectedRelease
       ? selectedReleaseQuery.data.error || "This release could not be found. Choose another version from the release history."
       : "";
   const release = selectedVersion ? selectedRelease : data?.latest;

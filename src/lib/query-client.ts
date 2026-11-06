@@ -6,8 +6,9 @@ export const persistedPublicQueryKeys = [
   ["testimonials", "approved"],
 ] as const;
 
-export function shouldPersistQuery(key: readonly unknown[]) {
-  return persistedPublicQueryKeys.some((persistedKey) => persistedKey.length === key.length && persistedKey.every((segment, index) => segment === key[index]));
+export function shouldPersistQuery(key: readonly unknown[], status: "pending" | "error" | "success") {
+  return status === "success" &&
+    persistedPublicQueryKeys.some((persistedKey) => persistedKey.length === key.length && persistedKey.every((segment, index) => segment === key[index]));
 }
 
 export function createAppQueryClient() {

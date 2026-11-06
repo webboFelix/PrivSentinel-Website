@@ -26,7 +26,7 @@ export function Providers({ children }: { children: ReactNode }) {
       persister,
       maxAge: 1000 * 60 * 60 * 24,
       dehydrateOptions: {
-        shouldDehydrateQuery: (query) => shouldPersistQuery(query.queryKey),
+        shouldDehydrateQuery: (query) => shouldPersistQuery(query.queryKey, query.state.status),
       },
     });
 

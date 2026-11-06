@@ -14,6 +14,10 @@ const optionalUrl = z.preprocess(
   (value) => resolveOptionalUrl(value),
   z.string().url().optional(),
 );
+const optionalHttpsUrl = z.preprocess(
+  (value) => resolveOptionalUrl(value),
+  z.string().url().refine((value) => new URL(value).protocol === "https:", "URL must use HTTPS.").optional(),
+);
 
 const serverEnvSchema = z.object({
   TURSO_DATABASE_URL: optionalNonEmpty,
@@ -23,6 +27,7 @@ const serverEnvSchema = z.object({
     z.string().min(32).optional(),
   ),
   BETTER_AUTH_URL: optionalUrl,
+  LOGO_URL: optionalHttpsUrl,
   INITIAL_SUPER_ADMIN_EMAIL: z.preprocess(
     (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
     z.string().trim().email().transform((value) => value.toLowerCase()).optional(),
@@ -47,6 +52,11 @@ const serverEnvSchema = z.object({
   GITHUB_REPO: optionalNonEmpty,
   NEXT_PUBLIC_APP_URL: optionalUrl,
   NEXT_PUBLIC_DEMO_VIDEO_URL: optionalNonEmpty,
+  NEXT_PUBLIC_SUPPORT_EMAIL: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().email().optional(),
+  ),
+  NEXT_PUBLIC_LINKEDIN_URL: optionalHttpsUrl,
 }).superRefine((env, context) => {
   if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
     context.addIssue({ code: "custom", message: "Configure both Google OAuth credentials." });
@@ -75,6 +85,15 @@ export function getAuthConfigurationStatus() {
 export function getPublicAppUrl() {
   const parsed = optionalUrl.safeParse(process.env.NEXT_PUBLIC_APP_URL);
   return parsed.success ? parsed.data : undefined;
+}
+
+export function getPublicContactChannels() {
+  const supportEmail = serverEnvSchema.shape.NEXT_PUBLIC_SUPPORT_EMAIL.safeParse(process.env.NEXT_PUBLIC_SUPPORT_EMAIL);
+  const linkedInUrl = optionalHttpsUrl.safeParse(process.env.NEXT_PUBLIC_LINKEDIN_URL);
+  return {
+    supportEmail: supportEmail.success ? supportEmail.data : undefined,
+    linkedInUrl: linkedInUrl.success ? linkedInUrl.data : undefined,
+  };
 }
 
 export function getDatabaseConfig() {

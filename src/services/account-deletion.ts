@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { InStatement } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { getDb, getLibsqlClient, ensureDatabaseSchema } from "@/db";
 import { billingCustomers, profileDetails } from "@/db/schema";
@@ -55,47 +56,60 @@ export async function cleanAccountDataBeforeDeletion(account: AccountToDelete, r
   const subjectHash = createHash("sha256").update(account.id).digest("hex");
   const transaction = await getLibsqlClient().transaction("write");
   try {
-    await transaction.execute({
-      sql: `DELETE FROM "audit_logs"
+    const statements: InStatement[] = [
+      {
+        sql: `DELETE FROM "audit_logs"
         WHERE "userId" = ?
           OR ("targetType" = 'user' AND "targetId" = ?)
           OR ("targetType" = 'testimonial' AND "targetId" IN (
             SELECT "id" FROM "testimonials" WHERE "userId" = ?
           ))`,
-      args: [account.id, account.id, account.id],
-    });
-    await transaction.execute({ sql: `DELETE FROM "testimonials" WHERE "userId" = ?`, args: [account.id] });
-    await transaction.execute({
-      sql: `DELETE FROM "verification"
+        args: [account.id, account.id, account.id],
+      },
+      { sql: `DELETE FROM "testimonials" WHERE "userId" = ?`, args: [account.id] },
+      {
+        sql: `DELETE FROM "verification"
         WHERE lower("identifier") = lower(?) OR "value" = ?`,
-      args: [account.email, account.id],
-    });
-    await transaction.execute({ sql: `DELETE FROM "account" WHERE "userId" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `DELETE FROM "session" WHERE "userId" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `DELETE FROM "downloads" WHERE "userId" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `DELETE FROM "payment_methods" WHERE "userId" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `DELETE FROM "billing_customers" WHERE "userId" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `DELETE FROM "profile_details" WHERE "userId" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `UPDATE "testimonials" SET "reviewedBy" = NULL WHERE "reviewedBy" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `UPDATE "release_overrides" SET "updatedBy" = NULL WHERE "updatedBy" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `UPDATE "admin_bootstrap" SET "completedBy" = NULL WHERE "completedBy" = ?`, args: [account.id] });
-    await transaction.execute({ sql: `UPDATE "session" SET "impersonatedBy" = NULL WHERE "impersonatedBy" = ?`, args: [account.id] });
+        args: [account.email, account.id],
+      },
+      { sql: `DELETE FROM "account" WHERE "userId" = ?`, args: [account.id] },
+      { sql: `DELETE FROM "session" WHERE "userId" = ?`, args: [account.id] },
+      { sql: `DELETE FROM "downloads" WHERE "userId" = ?`, args: [account.id] },
+      { sql: `DELETE FROM "payment_methods" WHERE "userId" = ?`, args: [account.id] },
+      { sql: `DELETE FROM "billing_customers" WHERE "userId" = ?`, args: [account.id] },
+      { sql: `DELETE FROM "profile_details" WHERE "userId" = ?`, args: [account.id] },
+      { sql: `UPDATE "testimonials" SET "reviewedBy" = NULL WHERE "reviewedBy" = ?`, args: [account.id] },
+      { sql: `UPDATE "release_overrides" SET "updatedBy" = NULL WHERE "updatedBy" = ?`, args: [account.id] },
+      { sql: `UPDATE "admin_bootstrap" SET "completedBy" = NULL WHERE "completedBy" = ?`, args: [account.id] },
+      { sql: `UPDATE "session" SET "impersonatedBy" = NULL WHERE "impersonatedBy" = ?`, args: [account.id] },
+    ];
     for (const scope of rateLimitScopes) {
       const key = `${scope}:${account.id}:`;
-      await transaction.execute({
+      statements.push({
         sql: `DELETE FROM "rate_limits" WHERE substr("key", 1, ?) = ?`,
         args: [key.length, key],
       });
     }
     for (const scope of subjectRateLimitScopes) {
-      await transaction.execute({
+      statements.push({
         sql: `DELETE FROM "rate_limits" WHERE "key" = ?`,
         args: [`${scope}:${subjectHash}`],
       });
     }
+    await transaction.batch(statements);
     await transaction.commit();
   } catch (error) {
-    await transaction.rollback();
-    throw new Error("Personal account data could not be removed. Try again.", { cause: error });
+    let cause: unknown = error;
+    try {
+      await transaction.rollback();
+    } catch (rollbackError) {
+      cause = new AggregateError(
+        [error, rollbackError],
+        "Account cleanup failed and the database transaction could not be rolled back.",
+      );
+    } finally {
+      transaction.close();
+    }
+    throw new Error("Personal account data could not be removed. Try again.", { cause });
   }
 }

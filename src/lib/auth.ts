@@ -1,12 +1,19 @@
-import { betterAuth } from "better-auth";
+import { APIError, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, createAccessControl } from "better-auth/plugins";
 import { getDb } from "@/db";
 import { auditLogs, schema } from "@/db/schema";
 import { getAuthConfigurationStatus, getServerEnv } from "@/lib/env";
 import { cleanAccountDataBeforeDeletion } from "@/services/account-deletion";
-import { enforceRateLimit, enforceRateLimitBySubject } from "@/lib/rate-limit";
+import {
+  checkRateLimit,
+  checkRateLimitBySubject,
+} from "@/lib/rate-limit";
 import { sendGmailEmail } from "@/lib/gmail-email";
+import {
+  buildPasswordResetEmail,
+  buildVerificationEmail,
+} from "@/lib/email-templates";
 
 const statements = {
   user: ["create", "list", "set-role", "ban", "impersonate", "impersonate-admins", "delete", "set-password", "set-email", "get", "update"],
@@ -67,13 +74,14 @@ function createAuth() {
         if (!env.GMAIL_SMTP_USER || !env.GMAIL_APP_PASSWORD) {
           throw new Error("Password reset email delivery is not configured.");
         }
-        const safeUrl = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        const email = buildPasswordResetEmail({ resetUrl: url, logoUrl: env.LOGO_URL });
         await sendGmailEmail({
           user: env.GMAIL_SMTP_USER,
           appPassword: env.GMAIL_APP_PASSWORD,
           to: user.email,
           subject: "Reset your PrivSentinel password",
-          html: `<p>Use this secure link to reset your PrivSentinel password:</p><p><a href="${safeUrl}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`,
+          html: email.html,
+          text: email.text,
           operation: "password-reset",
         });
       },
@@ -87,20 +95,33 @@ function createAuth() {
         if (!env.GMAIL_SMTP_USER || !env.GMAIL_APP_PASSWORD) {
           throw new Error("Email verification delivery is not configured.");
         }
-        const [subjectAllowed, addressAllowed] = await Promise.all([
-          enforceRateLimitBySubject("email-verification", user.id, 3, 3600),
-          request ? enforceRateLimit(request, "email-verification", 10, 3600) : Promise.resolve(true),
+        const [subjectLimit, addressLimit] = await Promise.all([
+          checkRateLimitBySubject("email-verification", user.id, 3, 3600),
+          request
+            ? checkRateLimit(request, "email-verification", 10, 3600)
+            : Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
         ]);
-        if (!subjectAllowed || !addressAllowed) {
-          throw new Error("Email verification requests are temporarily rate-limited.");
+        if (!subjectLimit.allowed || !addressLimit.allowed) {
+          const retryAfterSeconds = Math.max(
+            subjectLimit.allowed ? 0 : subjectLimit.retryAfterSeconds,
+            addressLimit.allowed ? 0 : addressLimit.retryAfterSeconds,
+          );
+          throw APIError.from("TOO_MANY_REQUESTS", {
+            code: "TOO_MANY_REQUESTS",
+            message: `Email verification limit reached. Try again in ${retryAfterSeconds} seconds.`,
+          });
         }
-        const safeUrl = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        const email = buildVerificationEmail({
+          verificationUrl: url,
+          logoUrl: env.LOGO_URL,
+        });
         await sendGmailEmail({
           user: env.GMAIL_SMTP_USER,
           appPassword: env.GMAIL_APP_PASSWORD,
           to: user.email,
           subject: "Verify your PrivSentinel email",
-          html: `<p>Confirm your email address to secure your PrivSentinel account:</p><p><a href="${safeUrl}">Verify email address</a></p><p>This link expires in one hour. If you did not create this account, you can ignore this email.</p>`,
+          html: email.html,
+          text: email.text,
           operation: "email-verification",
         });
       },

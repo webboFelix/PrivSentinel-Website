@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
-import { getDb } from "@/db";
+import { ensureDatabaseSchema, getDb } from "@/db";
 import { auditLogs, user } from "@/db/schema";
 import { getAuth } from "@/lib/auth";
 import { isAccountSuspended, isAdministrator } from "@/lib/permissions";
+import { clientIpFromHeaders, isIpBlocked } from "@/lib/security-events";
 
 type AuthSession = NonNullable<Awaited<ReturnType<ReturnType<typeof getAuth>["api"]["getSession"]>>>;
 
@@ -17,7 +18,9 @@ export type Principal = {
   };
 };
 
-export async function getPrincipal(requestHeaders: Headers): Promise<Principal | null> {
+export async function getPrincipal(requestHeaders: Headers, allowBlockedIp = false): Promise<Principal | null> {
+  await ensureDatabaseSchema();
+  if (!allowBlockedIp && await isIpBlocked(clientIpFromHeaders(requestHeaders))) return null;
   const session = await getAuth().api.getSession({ headers: requestHeaders });
   if (!session) return null;
 
@@ -33,7 +36,7 @@ export async function getPrincipal(requestHeaders: Headers): Promise<Principal |
     },
     where: eq(user.id, session.user.id),
   });
-  if (!account || isAccountSuspended(account)) return null;
+  if (!account || !account.emailVerified || isAccountSuspended(account)) return null;
 
   return {
     session,

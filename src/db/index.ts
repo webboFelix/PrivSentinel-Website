@@ -141,6 +141,33 @@ const schemaStatements = [
     "windowStart" integer NOT NULL,
     "count" integer DEFAULT 0 NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS "security_events" (
+    "id" text PRIMARY KEY NOT NULL,
+    "userId" text REFERENCES "user"("id") ON DELETE SET NULL,
+    "email" text,
+    "name" text,
+    "ipAddress" text NOT NULL,
+    "userAgent" text,
+    "action" text NOT NULL,
+    "createdAt" integer NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS "blocked_ips" (
+    "ipAddress" text PRIMARY KEY NOT NULL,
+    "reason" text NOT NULL,
+    "blockedBy" text REFERENCES "user"("id") ON DELETE SET NULL,
+    "blockedAt" integer NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS "contact_messages" (
+    "id" text PRIMARY KEY NOT NULL,
+    "name" text NOT NULL,
+    "email" text NOT NULL,
+    "message" text NOT NULL,
+    "status" text DEFAULT 'new' NOT NULL,
+    "response" text,
+    "respondedBy" text REFERENCES "user"("id") ON DELETE SET NULL,
+    "respondedAt" integer,
+    "createdAt" integer NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS "testimonials" (
     "id" text PRIMARY KEY NOT NULL,
     "name" text NOT NULL,
@@ -183,6 +210,9 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS "downloads_releaseId_idx" ON "downloads" ("releaseId")`,
   `CREATE INDEX IF NOT EXISTS "downloads_downloadedAt_idx" ON "downloads" ("downloadedAt")`,
   `CREATE INDEX IF NOT EXISTS "audit_logs_timestamp_idx" ON "audit_logs" ("timestamp")`,
+  `CREATE INDEX IF NOT EXISTS "security_events_ip_created_idx" ON "security_events" ("ipAddress", "createdAt")`,
+  `CREATE INDEX IF NOT EXISTS "security_events_created_idx" ON "security_events" ("createdAt")`,
+  `CREATE INDEX IF NOT EXISTS "contact_messages_status_created_idx" ON "contact_messages" ("status", "createdAt")`,
   `CREATE INDEX IF NOT EXISTS "testimonials_approvedAt_idx" ON "testimonials" ("approvedAt")`,
 ];
 

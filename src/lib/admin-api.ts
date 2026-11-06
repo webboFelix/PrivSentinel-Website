@@ -1,8 +1,8 @@
 import { getAdministrator, getPrincipal, type Principal } from "@/lib/authorization";
 import { isAdministrator, isSuperAdministrator } from "@/lib/permissions";
 
-export async function requireAdminApi(request: Request): Promise<Principal | Response> {
-  const principal = await getPrincipal(request.headers);
+export async function requireAdminApi(request: Request, allowBlockedIp = false): Promise<Principal | Response> {
+  const principal = await getPrincipal(request.headers, allowBlockedIp);
   if (!principal) {
     return Response.json({ error: "Authentication is required." }, { status: 401 });
   }

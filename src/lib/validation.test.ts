@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { countryOptions } from "@/lib/countries";
-import { normalizePhoneNumber, phoneNumberSchema, profileSchema, registrationSchema } from "./validation";
+import { emailSchema, normalizePhoneNumber, phoneNumberSchema, profileSchema, registrationSchema } from "./validation";
 
 describe("country options", () => {
   it("uses a stable country label for server and browser rendering", () => {
@@ -9,6 +9,13 @@ describe("country options", () => {
 });
 
 describe("registration validation", () => {
+  it("validates and normalizes email addresses", () => {
+    expect(emailSchema.safeParse("  ADA@example.com ").data).toBe("ada@example.com");
+    for (const email of ["", "invalid", "person@", "@example.com", "person@example", "person..name@example.com"]) {
+      expect(emailSchema.safeParse(email).success).toBe(false);
+    }
+  });
+
   it("normalizes common Kenyan phone number forms", () => {
     expect(normalizePhoneNumber("0712 345 678", "KE")).toBe("+254712345678");
     expect(normalizePhoneNumber("254-712-345-678", "KE")).toBe("+254712345678");

@@ -141,6 +141,41 @@ export const rateLimits = sqliteTable("rate_limits", {
   count: integer("count").notNull().default(0),
 });
 
+export const securityEvents = sqliteTable("security_events", {
+  id: text("id").primaryKey(),
+  userId: text("userId").references(() => user.id, { onDelete: "set null" }),
+  email: text("email"),
+  name: text("name"),
+  ipAddress: text("ipAddress").notNull(),
+  userAgent: text("userAgent"),
+  action: text("action").notNull(),
+  createdAt: createdAt(),
+}, (table) => [
+  index("security_events_ip_created_idx").on(table.ipAddress, table.createdAt),
+  index("security_events_created_idx").on(table.createdAt),
+]);
+
+export const blockedIps = sqliteTable("blocked_ips", {
+  ipAddress: text("ipAddress").primaryKey(),
+  reason: text("reason").notNull(),
+  blockedBy: text("blockedBy").references(() => user.id, { onDelete: "set null" }),
+  blockedAt: integer("blockedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const contactMessages = sqliteTable("contact_messages", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("new"),
+  response: text("response"),
+  respondedBy: text("respondedBy").references(() => user.id, { onDelete: "set null" }),
+  respondedAt: integer("respondedAt", { mode: "timestamp_ms" }),
+  createdAt: createdAt(),
+}, (table) => [
+  index("contact_messages_status_created_idx").on(table.status, table.createdAt),
+]);
+
 export const testimonials = sqliteTable("testimonials", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -192,6 +227,9 @@ export const schema = {
   downloads,
   auditLogs,
   rateLimits,
+  securityEvents,
+  blockedIps,
+  contactMessages,
   testimonials,
   adminBootstrap,
 };

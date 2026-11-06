@@ -42,6 +42,16 @@ describe("getAuthConfigurationStatus", () => {
     expect(resolveOptionalUrl("  ", "production")).toBeUndefined();
   });
 
+  it("accepts an optional HTTPS email logo URL", () => {
+    vi.stubEnv("LOGO_URL", "https://res.cloudinary.com/webbodev/image/upload/logo.png");
+    expect(getServerEnv().LOGO_URL).toBe("https://res.cloudinary.com/webbodev/image/upload/logo.png");
+  });
+
+  it("rejects insecure email logo URLs", () => {
+    vi.stubEnv("LOGO_URL", "http://example.com/logo.png");
+    expect(() => getServerEnv()).toThrow("Server environment configuration is invalid.");
+  });
+
   it("allows the initial administrator email without a shared bootstrap secret", () => {
     vi.stubEnv("INITIAL_SUPER_ADMIN_EMAIL", "admin@example.com");
     vi.stubEnv("GOOGLE_CLIENT_ID", "");
